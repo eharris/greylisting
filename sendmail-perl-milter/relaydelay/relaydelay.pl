@@ -318,10 +318,12 @@ sub eom_callback
     $rcpt_to = $3;
   }
   
-  # If and only if this message is from the null sender, check to see if we should tempfail it
-  #   (since we can't delay it after rcpt_to since that breaks SMTP callbacks)
+  # If and only if this message should be delayed, but for some reason couldn't be done 
+  #   at the rcpt_to stage, then do it here.  (This happens in cases where the 
+  #   delivery attempt looks like it is a SMTP callback, which needs to wait for
+  #   after the DATA phase to issue the tempfail)
   #   (We use a special rowid value of 00 to indicate a needed block)
-  if ($rowids eq "00" and ($mail_from eq "<>" or $tempfail_messages_after_data_phase)) {
+  if ($rowids eq "00" or $tempfail_messages_after_data_phase) {
     # Set the reply code to the normal default, but with a modified text part.
     #   I added the (TEMPFAIL) so it is easy to tell in the syslogs if the failure was due to
     #     the processing of the milter, or if it was due to other causes within sendmail
@@ -711,10 +713,12 @@ sub envrcpt_callback
 
   # FIXME - Should do mail logging?
   
-  # Special handling for null sender.  Spammers use it a ton, but so do things like exim's callback sender
-  #   verification spam checks.  If the sender is the null sender, we don't want to block it now, but will
-  #   instead block it at the eom phase.
-  if ($mail_from eq "<>" or $tempfail_messages_after_data_phase) {
+  # Special handling for the null sender.  Spammers use the null sender a ton, but so do things like Exim's callback 
+  #   sender verification spam checks.  If the sender is likely to be an SMTP callback, we don't want to block the 
+  #   mail attempt now, but will instead block it at the eom phase.
+  # UPDATE: Postfix appears to use <postmaster@some.domain> instead of the null sender for it's SMTP callbacks, 
+  #   so added that as another workaround check.
+  if ($mail_from eq "<>" or $mail_from =~ /\A<postmaster@/i or $tempfail_messages_after_data_phase) {
     print "  Delaying tempfail reject until eom phase.\n" if ($verbose);
   
     # save that this message needs to be blocked later in the transaction (after eom)

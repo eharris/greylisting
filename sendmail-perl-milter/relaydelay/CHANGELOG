@@ -1,6 +1,13 @@
 
 Changelog for relaydelay.pl and associated files:
 
+UNRELEASED - 
+
+  2003-07-07 - Discovered postfix normally uses <postmaster@some.domain> for 
+    its envelope from address when doing SMTP callbacks.  Changed milter to 
+    treat any email from postmaster@ as a callback and delay the tempfail
+    until after the DATA phase.
+
 0.02 - 
   2003-06-26 - Allowed for setting the initial delay to 0 seconds, which 
     allows new users to run in a "learning only" mode where no emails
