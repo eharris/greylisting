@@ -19,7 +19,7 @@ endif
 endif
 
 ifeq ($(unam),Linux)
-LIBS=-L/usr/lib/mysql  -lmilter -lmysqlclient_r  -lpthread -lm -lresolv -lnsl
+LIBS=-L/usr/lib/mysql -L/usr/lib/libmilter -lmilter -lmysqlclient_r  -lpthread -lm -lresolv -lnsl
 INCL=-I/usr/include/mysql
 endif
 
