@@ -211,7 +211,7 @@ void writelog(int level, char *msg, ...) /* Brad provided this */
 		timestrp = localtime(&now);
 		printf("%02d/%02d/%02d %02d:%02d:%02d ", 
 			   timestrp->tm_year-100 /* good until 2100...*/, 
-			   timestrp->tm_mon, timestrp->tm_mday, 
+			   timestrp->tm_mon+1, timestrp->tm_mday,  /* months are in range 0 to 11 */
 			   timestrp->tm_hour, timestrp->tm_min, timestrp->tm_sec);
 		
         va_start(ap, msg);
