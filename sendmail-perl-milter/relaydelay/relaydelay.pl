@@ -139,9 +139,11 @@ sub envfrom_callback
   #print "my_envfrom:\n";
   #print "   + args: '" . join(', ', @args) . "'\n";
 
-  # Save the envelope sender string, with a prepended value indicating
-  #   that we can expect an abort without having to handle anything
-  my $privdata = "0:$args[0]";
+  # Save out private data
+  #   The format is a comma seperated list of rowids (or zero if none),
+  #     followed by the envelope sender followed by the current envelope
+  #     recipient (or empty string if none) seperated by nulls
+  my $privdata = "0\x00$args[0]\x00";
   $ctx->setpriv(\$privdata);
 
   return SMFIS_CONTINUE;
@@ -159,16 +161,37 @@ sub eom_callback
 
   # Get our status and check to see if we need to do anything else
   my $privdata_ref = $ctx->getpriv();
-  my $status = ${$privdata_ref};
   # Clear our private data on this context
   $ctx->setpriv(undef);
-  #print "  IN EOM CALLBACK - PrivData: $status\n";
 
-  # Only if we have useful info in the status string, do we do anything.
-  if ($status =~ /\A([\d,]+):(.*)\Z/) {
-    my $rowids = $1;
-    my $mail_from = $2;  # unused
+  print "  IN EOM CALLBACK - PrivData: " . ${$privdata_ref} . "\n";
 
+  # parse and store the data
+  my $rowids;
+  my $mail_from;
+  my $rcpt_to;
+
+  # save the useful data
+  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+    $rowids = $1;
+    $mail_from = $2;
+    $rcpt_to = $3;
+  }
+  
+  # only do further processing if got and parsed the privdata
+  if (defined $rowids) {
+    # If and only if this message is from the null sender, check to see if we should delay it
+    #   (since we can't delay it after rcpt_to since that breaks exim's recipient callbacks)
+    #   (We use a special rowid value of 00 to indicate a needed block)
+    if ($mail_from eq "<>" && $rowids eq "00") {
+      # Set the reply code to the normal default, but with a modified text part.
+      $ctx->setreply("451", "4.7.1", "Please try again later (TEMPFAIL)");
+     
+      # Issue a temporary failure for this message.  Connection may or may not continue.
+      return SMFIS_TEMPFAIL;
+    }
+
+    # Only if we have some rowids, do we do db updates
     if ($rowids > 0) {
       # split up the rowids and update each in turn
       my @rowids = split(",", $rowids);
@@ -178,6 +201,7 @@ sub eom_callback
       }
     }
   }
+
   # Add a header to the message (if desired)
   #if (not $ctx->addheader("X-RelayDelay", "By kinison")) { print "  * Error adding header!\n"; }
 
@@ -202,24 +226,30 @@ sub abort_callback
   my $privdata_ref = $ctx->getpriv();
   #print " ABORT Got Ref\n";
   #print " ABORT Ref is undef\n" if (! defined($privdata_ref));
-  my $status = ${$privdata_ref};
-  #print " ABORT Deref'd Ref\n";
   # Clear our private data on this context
   $ctx->setpriv(undef);
-  #print " IN ABORT CALLBACK - PrivData: $status\n";
 
-  # Only if we have useful info in the status string, do we do anything.
-  if (defined $status && $status =~ /\A([\d,]+):(.*)\Z/) {
-    my $rowids = $1;
-    my $mail_from = $2;  # unused
+  print "  IN ABORT CALLBACK - PrivData: " . ${$privdata_ref} . "\n";
 
-    if ($rowids > 0) {
-      # split up the rowids and update each in turn
-      my @rowids = split(",", $rowids);
-      foreach my $rowid (@rowids) {
-        DoStatement("UPDATE relaytofrom SET aborted_count = aborted_count + 1 WHERE id = $rowid");
-        print "  * Mail was aborted.  Incrementing aborted count on rowid $rowid.\n";
-      }
+  # parse and store the data
+  my $rowids;
+  my $mail_from;
+  my $rcpt_to;
+
+  # save the useful data
+  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+    $rowids = $1;
+    $mail_from = $2;
+    $rcpt_to = $3;
+  }
+  
+  # only do further processing if have some rowids
+  if ($rowids > 0) {
+    # split up the rowids and update each in turn
+    my @rowids = split(",", $rowids);
+    foreach my $rowid (@rowids) {
+      DoStatement("UPDATE relaytofrom SET aborted_count = aborted_count + 1 WHERE id = $rowid");
+      print "  * Mail was aborted.  Incrementing aborted count on rowid $rowid.\n";
     }
   }
 
@@ -247,23 +277,22 @@ sub envrcpt_callback
 
   print "\n";
 
-  # Get the stored envelope sender
-  my $privdata_ref = $ctx->getpriv();
-  my $status = ${$privdata_ref};
-
   # declare our info vars
   my $rowid;
   my $rowids;
+  my $mail_from;
 
-  # get our status, and extract the existing rowids and the mail_from address
-  my $mail_from = $status;
-  if (! ($mail_from =~ s/\A([\d,]+):(.*)\Z/$2/)) {
-    print "ERROR: Passed status invalid.  Ignoring this message!\n";
-    GOTO PASS_MAIL;
-  }
-  $rowids = $1;
+  # Get the stored envelope sender and rowids
+  my $privdata_ref = $ctx->getpriv();
   my $rcpt_to = $args[0];
-
+  
+  # save the useful data
+  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+    $rowids = $1;
+    $mail_from = $2;
+  }
+  die "ERROR: Invalid privdata in envrcpt callback!\n" if (! defined $rowids);
+  
   print "Stored Sender: $mail_from\n";
   print "Passed Recipient: $rcpt_to\n";
 
@@ -307,7 +336,7 @@ sub envrcpt_callback
     goto PASS_MAIL;
   }
 
-  # Check for relay ip blacklisting, followed by whitelisting (by host or net)
+  # Check for relay ip blacklisting or whitelisting (by host or net)
   if ($blacklist_check_relay_ip || $whitelist_check_relay_ip) {
     my $tstr = $relay_ip;
     for (my $loop = 0; $loop < 4; $loop++) {
@@ -418,15 +447,19 @@ sub envrcpt_callback
 
     # Ok, we've verified the row doesn't already exist, so insert one
     my $sth = $dbh->prepare("INSERT INTO relaytofrom "
-      . "        (id,relay_ip,mail_from,rcpt_to,block_expires                           ,record_expires                                ,blocked_count,passed_count,origin_type,create_time) "
-      . " VALUES ( 0,       ?,        ?,      ?,NOW() + INTERVAL $delay_mail_secs SECOND,NOW() + INTERVAL $auto_record_life_secs SECOND,            1,           0,     'AUTO',      NOW())");
+      . "        (id,relay_ip,mail_from,rcpt_to,block_expires                           ,record_expires                                ,blocked_count,passed_count,aborted_count,origin_type,create_time) "
+      . " VALUES ( 0,       ?,        ?,      ?,NOW() + INTERVAL $delay_mail_secs SECOND,NOW() + INTERVAL $auto_record_life_secs SECOND,            0,           0,            0,     'AUTO',      NOW())");
     # insert the row
     $sth->execute($relay_ip, $mail_from, $rcpt_to) or die "Can't Execute: $sth->errstr";
     my $rc = $sth->finish;
+
+    # Get the rowid of the row we just inserted (in case we need it later)
+    $rowid = DoSingleValueQuery("SELECT LAST_INSERT_ID()");
+    
     # And release the table lock
     DoStatement("UNLOCK TABLE");
 
-    print "  New mail row successfully inserted.  Issuing a tempfail.\n";
+    print "  New mail row successfully inserted.  Issuing a tempfail.  rowid: $rowid\n";
     # and now jump to normal blocking actions
     goto DELAY_MAIL;
   }
@@ -436,17 +469,35 @@ sub envrcpt_callback
   DELAY_MAIL:
   # Increment the blocked count (if rowid is defined)
   DoStatement("UPDATE relaytofrom SET blocked_count = blocked_count + 1 WHERE id = $rowid") if (defined $rowid);
+
   # FIXME - And do mail logging
   
+  # Special handling for null sender.  Spammers use it a ton, but so do things like exim's callback sender
+  #   verification spam checks.  If the sender is the null sender, we don't want to block it now, but will
+  #   instead block it at the eom phase.
+  if ($mail_from eq "<>") {
+    print "  Mail is from null sender.  Delaying tempfail reject until eom phase.\n";
+  
+    # save that this message needs to be blocked later in the transaction (after eom)
+    my $privdata = "00\x00$mail_from\x00$rcpt_to";
+
+    # Save the changes to our privdata for the next callback
+    $ctx->setpriv(\$privdata);
+    
+    # and let the message continue processing, since will be blocked at eom if it isn't aborted
+    return SMFIS_CONTINUE;
+  }
+  
   # Save our privdata for the next callback (don't add this rowid, since have already handled it)
-  my $privdata = "$rowids:$rcpt_to";
-  $ctx->setpriv(\$privdata);
+  $ctx->setpriv($privdata_ref);
 
   # Set the reply code to a unique message (for debugging) - this dsn is what is normally the default
   $ctx->setreply("451", "4.7.1", "Please try again later (TEMPFAIL)");
   # Instead, we use a better code, 450 and 4.3.2 per RFC 821 and 1893, saying the system isn't currently accepting network messages
   # Disabled again.  This causes aol to retry deliveries over and over with no delay.
   #$ctx->setreply("450", "4.3.2", "Please try again later (TEMPFAIL)");
+  
+ 
   # Issue a temporary failure for this message.  Connection may or may not continue.
   return SMFIS_TEMPFAIL;
 
@@ -472,7 +523,6 @@ sub envrcpt_callback
       }
     }
 
-
     # If we have a rowid, then set the context data to indicate we 
     #   successfully handled this message as a pass, and that we 
     #   don't expect an abort without needing further processing.  
@@ -489,12 +539,12 @@ sub envrcpt_callback
     }
   }
   # Save our privdata for the next callback
-  my $privdata = "$rowids:$rcpt_to";
+  my $privdata = "$rowids\x00$mail_from\x00$rcpt_to";
   $ctx->setpriv(\$privdata);
 
   # FIXME - And do mail logging
  
-  # And indicate the message should be passed.
+  # And indicate the message should continue processing.
   return SMFIS_CONTINUE;
 }
 
