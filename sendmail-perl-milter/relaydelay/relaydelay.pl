@@ -357,7 +357,8 @@ sub eom_callback
       print "  * Mail successfully processed.  Incremented passed count on rowid $rowid.\n" if ($verbose);
 
       # If configured to do so, then update the lifetime (only on AUTO records)
-      if ($update_record_life) {
+      #   If this was from the null-sender, don't update, as have already expired the record, and don't want to reset.
+      if ($update_record_life and $mail_from ne "<>") {
         # This is done here rather than the rcpt callback since we don't know until now that
         #   the delivery is completely successful (not spam blocked or nonexistant user, or 
         #   other failure out of our control)
@@ -834,7 +835,7 @@ sub envrcpt_callback
     if ($mail_from eq "<>") {
       # Only update the lifetime of records if they are AUTO, wouldn't want to do wildcard records
       $dbh->do("UPDATE relaytofrom SET record_expires = NOW() WHERE id = $rowid AND origin_type = 'AUTO'") or goto DB_FAILURE;
-      #print "  Mail is from NULL sender.  Updated it to end its life.\n" if ($verbose);
+      print "  Mail is from null-sender.  Updated it to end its life.\n" if ($verbose);
     }
 
     # Since we have a rowid, then set the context data to indicate we successfully 
