@@ -739,7 +739,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	MYSQL_ROW row;
 	char buf2[BUFSIZE], *p2, buf3[BUFSIZE];
 	char *tmp, relay_ip[1000], relay_name[1000], relay_ident[1000], relay_maybe_forged[1000];
-	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id;
+	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id, *if_addr;
 	char *rcpt_to2[BUFSIZE], *tstr;
 	char rcpt_domain[BUFSIZE], rcpt_acct[BUFSIZE],*r2;
 	char from_domain[BUFSIZE], from_acct[BUFSIZE];
@@ -836,6 +836,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	rcpt_mailer = smfi_getsymval(ctx,"{rcpt_mailer}");
 	recipient = smfi_getsymval(ctx,"{rcpt_addr}");
 	queue_id = smfi_getsymval(ctx,"{i}");
+	if_addr = smfi_getsymval(ctx,"{if_addr}");
 
 	writelog(2,"  From: %s  -  To: %s\n", sender, recipient);
 	writelog(2,"  InMailer: %s  -  OutMailer: %s   -  QueueID: %s\n", mail_mailer, rcpt_mailer, queue_id);
@@ -844,11 +845,20 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	   A lot of spam is sent with the null sender address <>.  Sendmail reports
 	   that as being from the local mailer, so we have a special case that needs
 	   handling (but only if not also from localhost). */
-	if( !strstr(mail_mailer,"smtp") && ( strcmp(mail_from,"<>") || !strcmp(relay_ip,"127.0.0.1")))
+	if( strstr(mail_mailer,"smtp") != NULL && strcmp(mail_mailer,"local") != 0)
 	{
 		/* we aren't using an smtp-like mailer, so bypass checks */
 		writelog(1,"  Mail delivery is not using an smtp-like mailer (%s). (from=%s)  Skipping checks.\n",
 				 mail_mailer, mail_from);
+		goto PASS_MAIL;
+	}
+
+        /* Check to see if the mail is looped back on a local interface and skip checks if so */
+	if( strcmp(if_addr,relay_ip) == 0 )
+	{
+		/* we aren't using an smtp-like mailer, so bypass checks */
+		writelog(1,"  Mail delivery is sent from a local interface.  Skipping checks (%s).  Skipping checks.\n",
+				 if_addr);
 		goto PASS_MAIL;
 	}
 
