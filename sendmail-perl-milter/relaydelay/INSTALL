@@ -1,12 +1,14 @@
 
 PREREQUISITES:
 
-1. Make sure you have a version of perl with threading compiled in.  I recommend
-   at least 5.8.0.  If for some reason you want to keep an older versino of perl
-   for your system, just build a new threaded perl somewhere and call it 
-   directly when starting the perl script.
-2. Make sure you have Sendmail 8.12.x with the milter interface compiled in, and 
-   the milter libraries installed.
+1. Make sure you have a version of perl with threading compiled in.  I 
+   recommend at least 5.8.0.  If for some reason you want to keep an older 
+   version of perl for your system, just build a new threaded perl somewhere 
+   and call it directly when starting the perl script.  
+   Note: Perl 5.8.2's threading support seems to be a lot more stable than i
+   5.8.0, at least in our test environment.
+2. Make sure you have Sendmail 8.12.x with the milter interface compiled in, 
+   and the milter libraries installed.
 3. Make sure you have a functional mysql database server, I recommend later
    subversions of 3.23.xx.  Or better yet, get 4.0.
 4. Grab Sendmail::Milter and build and install it.
@@ -40,9 +42,9 @@ INSTALLATION:
    define(`MILTER',1)
    INPUT_MAIL_FILTER(`relaydelay', `S=local:/var/run/relaydelay.sock, F=T, T=S:1m;R:2m;E:3m')dnl
 
-   Note that the define line is only required if it's not already in the config
-   file somewhere.  It's probably already there if you're using another milter
-   like amavis with spamassassin (which is recommended).
+   Note that the define line is only required if it's not already in the 
+   config file somewhere.  It's probably already there if you're using 
+   another milter like amavis with spamassassin (which is recommended).
 
    If for some reason the milter is unavailable, with the lines above, the 
    F=T parameter indicates that sendmail should tempfail any connections if 
@@ -63,10 +65,11 @@ INSTALLATION:
    to your sendmail.mc.  Adjust the limit as appropriate for your normal
    level of email.
 
-5. Make sure the script has the execute bit set, and test the configuration by 
-   opening another window and running relaydelay.pl.  If the relaydelay.conf
-   file is located somewhere other than the default /etc/mail/ directory, 
-   simply specify the file location as the only parameter.
+5. Make sure the script has the execute bit set, and test the configuration 
+   by opening another window and running relaydelay.pl.  If the 
+   relaydelay.conf file is located somewhere other than the default 
+   /etc/mail/ directory, simply specify the file location as the only 
+   parameter.
 
    Or, if you built a threaded perl somewhere else that isn't the system 
    installed perl, run something like:
@@ -90,11 +93,10 @@ from the active table, they are copied to the reporting table.
 
 UPGRADING:
 
-If you are upgrading from Version a version prior to 0.04, please make
-sure that you have updated your config file to reflect the new available
-options, and that the socket name specified in the relaydelay.conf file
-matches the socket name in your INPUT_MAIL_FILTER line in your sendmail
-config.
+If you are upgrading from a prior version, please make sure that you 
+have updated your config file to reflect the new available options, 
+and that the socket name specified in the relaydelay.conf file matches 
+the socket name in your INPUT_MAIL_FILTER line in your sendmail config.
 
 
 Enjoy!
