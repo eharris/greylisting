@@ -4,7 +4,7 @@
 #
 # File: relaydelay.pl
 #
-# Version: 0.02
+# Version: 0.04
 # 
 # Programmer: Evan J. Harris <eharris@puremagic.com>
 #
