@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/perl -w
 
 #############################################################################
 #
@@ -490,7 +490,7 @@ sub reverse_track($$$)
   return if (defined($rowid));
 
   # If got here, then need to create a reverse record
-  my $sth = $dbh->prepare("INSERT INTO relaytofrom "
+  $sth = $dbh->prepare("INSERT INTO relaytofrom "
     . " (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) "
     . " VALUES (NULL,?,?,NOW(),NOW() + INTERVAL $reverse_mail_life_secs SECOND,'AUTO',NOW())") or goto DB_FAILURE;
   # Note the reversed from and to fields! 
@@ -591,7 +591,7 @@ sub envrcpt_callback
   }
 
   # Only do our processing if the mail client is not authenticated in some way
-  if ($authen ne "")
+  if (defined($authen) and $authen ne "")
   {
     print "  AuthType: $authtype - Credentials: $authen\n" if ($verbose);
     print "  Mail delivery is authenticated.  Skipping checks.\n" if ($verbose);
@@ -627,7 +627,7 @@ sub envrcpt_callback
     goto DB_FAILURE if ($sth->err);
     $sth->finish();
 
-    if ($rowid > 0) {
+    if (defined $rowid) {
       if ($blacklisted) {
         print "  Blacklisted Relay.  Skipping checks and rejecting the mail.\n" if ($verbose);
         goto DELAY_MAIL;
@@ -670,7 +670,7 @@ sub envrcpt_callback
     goto DB_FAILURE if ($sth->err);
     $sth->finish();
 
-    if ($rowid > 0) {
+    if (defined $rowid) {
       if ($blacklisted) {
         print "  Blacklisted Recipient.  Skipping checks and rejecting the mail.\n" if ($verbose);
         goto DELAY_MAIL;
@@ -723,7 +723,7 @@ sub envrcpt_callback
   goto DB_FAILURE if ($sth->err);
   $sth->finish();
 
-  if ($rowid > 0) {
+  if (defined $rowid) {
     if ($block_expired) {
       print "  Email is known and block has expired.  Passing the mail.  rowid: $rowid\n" if ($verbose);
       # If this record is a reverse tracking record with unknown IP, then 
@@ -748,7 +748,7 @@ sub envrcpt_callback
   #   same triplet info to two seperate MX hosts to create duplicate rows.  The real chances this will happen 
   #   are EXTREMELY small, but we still account for the possibility by doing row ordering on the query above.
 
-  my $sth = $dbh->prepare("INSERT INTO relaytofrom "
+  $sth = $dbh->prepare("INSERT INTO relaytofrom "
     . "        (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) "
     . " VALUES (?,?,?,NOW() + INTERVAL $delay_mail_secs SECOND,NOW() + INTERVAL $auto_record_life_secs SECOND, "
     . "   'AUTO', NOW())") or goto DB_FAILURE;
