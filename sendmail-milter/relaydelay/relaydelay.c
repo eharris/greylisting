@@ -255,6 +255,7 @@ int db_query(char *commandbuf, MYSQL_RES **result)
 		else
 		{
 			writelog(1,"ERROR: Database Call Failed: %s\n", mysql_error(&global_dbh));
+			writelog(1,"=====  query was: %s\n", commandbuf);
 			db_disconnect();
 			++try_count;
 		}
@@ -1036,7 +1037,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				strcpy(buf2,buf3);
 			}
 		}
-		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW()   AND relay_ip IS NULL AND rcpt_to   IS NULL AND (%s) ORDER BY length(mail_from) DESC", subquery);
+		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) ORDER BY length(mail_from) DESC", subquery);
 		if( db_query(query, &result) )
 			goto DB_FAILURE;
 
