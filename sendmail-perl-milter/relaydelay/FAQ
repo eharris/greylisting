@@ -1,0 +1,14 @@
+
+Frequently Asked Questions:
+
+(This list will be added to as more are discovered)
+
+Q. Why am I getting a "Inappropriate ioctl for device" error when trying to
+   configure the milter to use sendmail's access db?
+
+A. This is most likely an incompatibility between the Berkeley DB libraries
+   that perl/tie/DB_File are compiled with or using, and the version that 
+   sendmail's makemap program was compiled with.  Make sure that the 
+   libraries/versions match, or disable the access db checking.
+
+   
