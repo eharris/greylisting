@@ -20,22 +20,22 @@
 127.0.0.1       # Of course we don't want to delay ourselves or local users
 192.168         # Don't delay our private networks either
 10              # Private net (class A)
-172.16.0        # Another private net (inidividual entries, since can't
-172.16.1        #   do a /12 netmask easily
-172.16.2
-172.16.3
-172.16.4
-172.16.5
-172.16.6
-172.16.7
-172.16.8
-172.16.9
-172.16.10
-172.16.11
-172.16.12
-172.16.13
-172.16.14
-172.16.15
+172.16          # Another private net (inidividual entries, since can't
+172.17          #   do a /12 netmask easily
+172.18
+172.19
+172.20
+172.21
+172.22
+172.23
+172.24
+172.25
+172.26
+172.27
+172.28
+172.29
+172.30
+172.31
 
 # Public Servers
 
@@ -49,6 +49,10 @@
 66.135.197      # Ebay
 66.218.66       # Yahoo Groups servers (common pool, no retry)
 152.163.225     # AOL
+195.238.2.105   # skynet.be (wierd retry pattern)
+195.238.2.124   # skynet.be 
+195.238.3.12    # skynet.be
+195.238.3.13    # skynet.be
 204.107.120.10  # Ameritrade (no retry)
 205.188.156     # AOL
 205.206.231     # SecurityFocus.com (unique sender per attempt)
