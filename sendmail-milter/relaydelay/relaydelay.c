@@ -980,7 +980,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			}
 			if( atoi(row[2]) )
 			{
-				writelog(1,"  Whitelisted Relay %s. Skipping checks and passing the mail.\n", rcpt_domain);
+				writelog(1,"  Whitelisted Recpt %s. Skipping checks and passing the mail.\n", rcpt_domain);
 				goto PASS_MAIL;
 			}
 		}
