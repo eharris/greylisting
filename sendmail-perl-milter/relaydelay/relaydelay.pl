@@ -206,6 +206,27 @@ my $reverse_mail_tracking = 1;
 #   used if $reverse_mail_tracking is enabled.
 my $reverse_mail_life_secs = 4 * 24 * 3600;  # 4 Days
 
+# Set this to true if you want the relaydelay milter to try to autolearn local
+#   recipients and domains, and have non-primary MX's block (tempfail) mail to
+#   unlearned local recipients.  This gives a mechanism for a cooperating set 
+#   of mail hosts running the milter to avoid relaying (and double-bounces) 
+#   for invalid recipients until at least one successful mail to that 
+#   recipient has been processed by the primary MX, using the "local" mailer.
+# There is no point in enabling this unless your primary MX is also the 
+#   MTA that handles delivery for your domains, and you have more than one
+#   MX host for some or all of the domains you handle, and they are all 
+#   running the milter.
+# In fact, if this is enabled and there are any rows existing in the 
+#   localemail table that are in your domains, only a greylisting host
+#   delivering mail with sendmail's "local" mailer will be able to accept
+#   mail for any recipients that are not listed.  USE WITH CAUTION.
+my $learn_local_recipients = 1;
+
+# This parameter controls how long records for local recipients live
+#   (if $learn_local_recipients is enabled).  This specifies how 
+#   long secondaries will pass mail for the listed recipient without
+#   the primary MX host having passed a mail for this recipient.
+my $learn_local_recipients_life_secs = 30 * 24 * 3600;  # 30 Days
 
 #############################################################
 # End of options for use in external config file
@@ -398,7 +419,7 @@ sub eom_callback
   }
 
   # Only if we have some rowids, do we update the count of passed messages
-  if ($rowids > 0) {
+  if (substr($rowids, 0, 1) ne '0') {
     # split up the rowids and update each in turn
     my @rowids = split(",", $rowids);
     foreach my $rowid (@rowids) {
@@ -467,7 +488,7 @@ sub abort_callback
   
   # only increment the aborted_count if have some rowids 
   #   (this means we didn't expect/cause an abort, but something else did)
-  if ($rowids > 0) {
+  if (substr($rowids, 0, 1) ne '0') {
     # Ok, we need to update the db, so get a handle
     my $dbh = db_connect(0) or goto DB_FAILURE;
   
@@ -1067,7 +1088,7 @@ sub envrcpt_callback
     #   recipients, and we need it for logging.
     # The format of the privdata is one or more rowids seperated by commas, followed by 
     #   a null, and the envelope from.
-    if ($rowids > 0) {
+    if (substr($rowids, 0, 1) ne '0') {
        $rowids .= ",$rowid";
     } else {
       $rowids = $rowid;  
