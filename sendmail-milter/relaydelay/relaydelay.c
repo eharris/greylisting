@@ -705,7 +705,8 @@ sfsistat abort_callback(SMFICTX *ctx)
 #   whitelisting process again the next time they try.  BUT ONLY IF THIS
 #   IS AN AUTO RECORD.
 # If we find that it is such a record, update the expire time to now */
-		sprintf(commandbuf, "UPDATE relaytofrom SET record_expires = NOW() WHERE id = %s AND origin_type = 'AUTO' AND passed_count = 0", arr[i] );
+		sprintf(commandbuf, "UPDATE relaytofrom SET record_expires = NOW() \
+WHERE id = %s AND origin_type = 'AUTO' AND passed_count = 0", arr[i] );
 		if( db_query(commandbuf, &result) )
 		{
 			if( pass_mail_when_db_unavail )
@@ -1152,7 +1153,7 @@ WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) O
 
 	/* Check to see if we already know this triplet set, and if the initial block is expired */
 
-	sprintf(query2,"SELECT id, NOW() > block_expires FROM relaytofrom 
+	sprintf(query2,"SELECT id, NOW() > block_expires FROM relaytofrom \
 WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'", 
 			mail_from, rcpt_to);
 	if( do_relay_lookup_by_subnet )
