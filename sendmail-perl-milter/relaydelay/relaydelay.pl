@@ -365,7 +365,7 @@ sub eom_callback
   #   delivery attempt looks like it is a SMTP callback, which needs to wait for
   #   after the DATA phase to issue the tempfail)
   #   (We use a special rowid value of 00 to indicate a needed block)
-  if ($rowids eq "00" or $tempfail_messages_after_data_phase) {
+  if ($rowids eq "00") {
     # Set the reply code to the normal default, but with a modified text part.
     #   I added the (TEMPFAIL) so it is easy to tell in the syslogs if the failure was due to
     #     the processing of the milter, or if it was due to other causes within sendmail
