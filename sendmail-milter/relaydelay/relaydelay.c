@@ -1035,7 +1035,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	   Do the check in such a way that more exact matches are returned first */
 	if( check_wildcard_mail_from )
 	{
-		char buf2[BUFSIZE],*p2,buf3[BUFSIZE];
+		char *p2,buf3[BUFSIZE];
 		char subquery[BUFSIZE];
 		char query[BUFSIZE];
 		MYSQL_ROW row;
@@ -1048,21 +1048,24 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			if( subquery[0] )
 				strcat(subquery," OR ");
 			strcat(subquery,"mail_from = '<");
-			if( rcpt_acct[0] )
+			if( rcpt_acct[0] && i == 1)
 			{
 				strcat(subquery,from_acct);
 				strcat(subquery,"@");
 			}
 			strcat(subquery,buf2);
 			strcat(subquery,">'");
-			p2 = strchr(buf2,'.');
-			if(p2)
+			if( i > 1 )
 			{
-				strcpy(buf3,p2+1);
-				strcpy(buf2,buf3);
+				p2 = strchr(buf2,'.');
+				if(p2)
+				{
+					strcpy(buf3,p2+1);
+					strcpy(buf2,buf3);
+				}
+				else
+					break;
 			}
-			else
-				break;
 		}
 		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) ORDER BY length(mail_from) DESC", subquery);
 		if( db_query(query, &result) )
