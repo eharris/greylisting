@@ -312,7 +312,7 @@ sub eom_callback
   my $rcpt_to;
 
   # save the useful data
-  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+  if (${$privdata_ref} =~ /\A([\d:,]+)\x00(.*)\x00(.*)\Z/) {
     $rowids = $1;
     $mail_from = $2;
     $rcpt_to = $3;
@@ -340,6 +340,13 @@ sub eom_callback
     # split up the rowids and update each in turn
     my @rowids = split(",", $rowids);
     foreach my $rowid (@rowids) {
+      # Make sure this rowid is a local recipient before updating the record
+      my ($rowid, $local) = split(":", $rowid);
+      if ($local == 0) {
+        print "  * Mail successfully processed.  Non-local recipient, not updating rowid $rowid.\n";
+        next;
+      }
+
       $dbh->do("UPDATE relaytofrom SET passed_count = passed_count + 1 WHERE id = $rowid") or goto DB_FAILURE;
       print "  * Mail successfully processed.  Incremented passed count on rowid $rowid.\n" if ($verbose);
 
@@ -396,7 +403,7 @@ sub abort_callback
   my $rcpt_to;
 
   # save the useful data
-  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+  if (${$privdata_ref} =~ /\A([\d:,]+)\x00(.*)\x00(.*)\Z/) {
     $rowids = $1;
     $mail_from = $2;
     $rcpt_to = $3;
@@ -411,6 +418,9 @@ sub abort_callback
     # split up the rowids and update each in turn
     my @rowids = split(",", $rowids);
     foreach my $rowid (@rowids) {
+      # strip off the local flag, since we update aborted even if non-local
+      my ($rowid, $local) = split(":", $rowid);
+
       $dbh->do("UPDATE relaytofrom SET aborted_count = aborted_count + 1 WHERE id = $rowid") or goto DB_FAILURE;
       print "  * Mail was aborted.  Incrementing aborted count on rowid $rowid.\n" if ($verbose);
 
@@ -775,12 +785,10 @@ sub envrcpt_callback
     #   recipients, and we need it for logging.
     # The format of the privdata is one or more rowids seperated by commas, followed by 
     #   a null, and the envelope from.
-    if ($rowids > 0) {
-      $rowids .= ",$rowid";
-    }
-    else {
-      $rowids = $rowid;
-    }
+    # Modified to add an indicator if the recipient is local (since may be different for each recipient)
+    $rowids = "" if ($rowids == 0);  # make sure $rowids is a string
+    $rowids .= "," if ($rowids > 0);  # tack on a record if one is already present
+    $rowids .= "$rowid:" . ($rcpt_mailer =~ /\Alocal\Z/i ? "1" : "0");
   }
   # Save our privdata for the next callback
   my $privdata = "$rowids\x00$mail_from\x00$rcpt_to";

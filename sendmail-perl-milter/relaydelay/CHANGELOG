@@ -1,7 +1,17 @@
 
 Changelog for relaydelay.pl and associated files:
 
-UNRELEASED - 
+UNRELEASED -
+
+  2003-07-09 - Uncovered a slight accounting problem in the milter that 
+    caused some rows not to be expired as they should, as well as 
+    incorrectly updating the passed_count.  The problem only shows itself
+    if there is another MX host forwarding for a domain.  Changed the milter
+    so that we do not increment the passed count if the outmailer is not
+    local (if the mail will be forwarded to another host).  This will keep
+    the counts of individual emails correct (rather than relay hops), and 
+    will keep records stemming from mails to invalid users from being 
+    upgraded to whitelisted rather than immediately expired.
 
   2003-07-07 - Discovered postfix normally uses <postmaster@some.domain> for 
     its envelope from address when doing SMTP callbacks.  Changed milter to 
