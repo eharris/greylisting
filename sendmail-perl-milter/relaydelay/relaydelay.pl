@@ -33,6 +33,7 @@
 
 use Sendmail::Milter;
 use Socket;
+use POSIX qw(strftime);
 use Errno qw(ENOENT);
 
 use DBI;
@@ -543,7 +544,7 @@ sub envrcpt_callback
   #   Not used (since I don't want to depend on it)
   #my $hostname = hostname();
 
-  print "\n" if ($verbose);
+  print strftime("\n=== %Y-%m-%d %H:%M:%S ===\n", localtime($timestamp)) if ($verbose);
 
   # declare our info vars
   my $rowid;
