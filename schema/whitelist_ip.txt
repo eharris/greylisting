@@ -44,11 +44,13 @@
 64.12.136       # AOL (common pool)
 64.12.137       # AOL
 64.12.138       # AOL
+64.124.204.39	# moveon.org (unique sender per attempt)
 64.125.132.254  # collab.net (unique sender per attempt)
 66.135.209      # Ebay (for time critical alerts)
 66.135.197      # Ebay
 66.218.66       # Yahoo Groups servers (common pool, no retry)
 152.163.225     # AOL
+194.245.101.88	# Joker.com email forwarding server
 195.238.2.105   # skynet.be (wierd retry pattern)
 195.238.2.124   # skynet.be 
 195.238.3.12    # skynet.be
@@ -62,6 +64,6 @@
 207.171.187     # Amazon.com
 207.171.188     # Amazon.com
 207.171.190     # Amazon.com
-213.136.52.31   # Mysql.com (unique sender)
+213.115.162.31  # Mysql.com (unique sender)
 217.158.50.178  # AXKit mailing list (unique sender per attempt)
 
