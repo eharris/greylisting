@@ -1698,14 +1698,14 @@ WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'",
 	{
 		if( block_expired )
 		{
-			writelog(1,"  Email is known and block has expired. Passing the mail. Rowid: %s\n", row_id);
+			writelog(1,"  Email is known and block has expired. Passing the mail.(%s,%s,%s) Rowid: %s\n", relay_ip, mail_from, rcpt_to, row_id);
 			goto PASS_MAIL;
 		}
 		else
 		{
 			/* the email is known, but the blick has not expired. So return a tempfail. */
-			writelog(1,"  Email is known, but the block has not expired. Issueing a tempfail. Rowid: %s\n",
-					row_id);
+			writelog(1,"  Email is known, but the block has not expired. Issueing a tempfail.(%s,%s,%s) Rowid: %s\n",
+					 relay_ip, mail_from, rcpt_to, row_id);
 			goto DELAY_MAIL;
 		}
 	}
