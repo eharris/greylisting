@@ -1,5 +1,5 @@
 SENDMAIL=/export/home/murf/sendmail-8.12.9
-VERSION = 0.2
+VERSION = 0.3
 unam = $(strip ${shell /bin/uname})
 
 ifeq ($(unam),SunOS)
@@ -13,13 +13,32 @@ INCL=-I/usr/include/mysql
 endif
 
 
-relaydelay : relaydelay.o
-	gcc -g -o relaydelay relaydelay.o $(LIBS)
+relaydelay : relaydelay.o config_gram.o config_lex.o
+	gcc -g -o relaydelay relaydelay.o config_gram.o config_lex.o $(LIBS)
 
 relaydelay.o : relaydelay.c
 	gcc -c -g $(INCL) relaydelay.c -DVERSION=\"$(VERSION)\"
 
+config_gram.o : config_gram.tab.c
+	gcc -c -g config_gram.tab.c -o config_gram.o
+
+config_lex.o : config_lex.c
+	gcc -c -g config_lex.c
+
+config_gram.tab.c config_gram.tab.h : config_gram.y
+	bison -p relaydelay_ -vd config_gram.y
+
+config_lex.c : config_lex.l config_gram.tab.h
+	flex -Prelaydelay_ config_lex.l
+	mv lex.relaydelay_.c config_lex.c
+
 tar :
-	(cd ..; tar czvf relaydelay_c-$(VERSION).tar.gz relaydelay-$(VERSION)/Makefile relaydelay-$(VERSION)/relaydelay.c)
+	(cd ..; tar czvf relaydelay_c-$(VERSION).tar.gz relaydelay-$(VERSION)/Makefile relaydelay-$(VERSION)/relaydelay.c \
+	relaydelay-$(VERSION)/config_lex.l \
+	relaydelay-$(VERSION)/config_gram.y \
+	relaydelay-$(VERSION)/relaydelay.conf \
+	)
 clean:
-	rm -f relaydelay relaydelay.o
+	rm -f relaydelay relaydelay.o config_gram.o config_gram.tab.c config_gram.tab.h config_lex.c config_lex.o config_gram.output
+
+
