@@ -23,13 +23,6 @@ char *database_user    = "milter";
 char *database_pass    = "password";
 char *config_file_name = "/etc/mail/relaydelay.conf";
 
-/* FOR THE ACCESS DB QUERIES */
-
-#ifdef DB_VERSION_MAJOR
-DB *dbp; 
-DBT key, data;
-#endif
-
 #define BUFSIZE          4096
 #define SAFESIZ          4095
 #define MAX_QUERY_TRIES  1
@@ -218,6 +211,76 @@ void writelog(int level, char *msg, ...) /* Brad provided this */
 		fflush(stdout);
 	}
 }
+
+/* ========================== FOR THE ACCESS DB QUERIES ================ */
+
+#ifdef DB_VERSION_MAJOR
+DB *dbp; 
+DBT key, data;
+
+int access_query(char *lookforkey, char *hopingforvalue)
+{
+	char valbuf[200];
+	int ret;
+	
+	key.data = lookforkey;
+	key.size = strlen(key.data);
+	key.ulen = key.size+1;
+	valbuf[0]= 0;
+	data.ulen=200;
+	data.data = valbuf;
+	data.size = 0;
+	data.flags = DB_DBT_USERMEM;
+	key.flags = DB_DBT_USERMEM;
+	
+	writelog(2,"About to check ACCESS DB for %s --", key.data);
+	if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+	{
+		valbuf[data.size] = 0;
+		writelog(2,"FOUND: %s\n", data.data);
+		if( strncmp(data.data,hopingforvalue,data.size) == 0 )
+		{
+			return 1;
+		}
+	} 
+	else 
+		writelog(2,"NOPE. ret= %d\n",ret);
+	return 0;
+}
+
+void print_access_contents(void)
+{
+	DBC *cursor;
+	int ret;
+	char valbuf[200];
+	char keybuf[200];
+	
+	key.data = keybuf;
+	key.size = 0;
+	key.ulen = 200;
+	valbuf[0]= 0;
+	keybuf[0]= 0;
+	data.ulen=200;
+	data.size = 0;
+	data.data = valbuf;
+	data.flags = DB_DBT_USERMEM;
+	key.flags = DB_DBT_USERMEM;
+	
+	ret = dbp->cursor(dbp, NULL, &cursor, 0);
+	if( ret != 0 )
+		writelog(2,"CURSOR func failed with %d\n", ret);
+	while( (ret=cursor->c_get(cursor,&key,&data,DB_NEXT)) == 0 )
+	{
+		keybuf[key.size] = 0;
+		valbuf[data.size] = 0;
+		writelog(2,"  accessdb  key=%s      val= %s\n", key.data, data.data);
+	}
+	writelog(2,"Cursor get loop broken with return value %d\n", ret);
+	cursor->c_close(cursor);
+}
+
+
+#endif
 
 
 
@@ -496,7 +559,7 @@ void reverse_track(char *mail_from, char *rcpt_to)
 	if( db_query(query, &result) )
 		return;
 	
-	if (verbose) 
+	if (verbose)
 	{
 		/* # Get the rowid for the debugging message */
 		if( db_query("SELECT LAST_INSERT_ID()", &result) )
@@ -1156,6 +1219,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	  #   accept the mail anyway and we want to let sendmail give the sender an immediate failure.
 	  # As strange as it seems, we do not want to bypass the checks if the value is OK or SKIP.
 	  # Only do the access.db checks if the var holding the file name has been defined
+
+	  # SMM--- ALSO, NOTE: using 2.7.7 Sleepycat Berk DB, I notice that the key values stored in the db
+	  # are all lowercase, no matter what was put in the access file. So, searching for Spam:whatever
+	  # will never work. So, I changed the Spam:whatever to spam:whatever, and now I see some success.
+	  # Uh, Connect: vs connect, also. If this is bogus for later versions, well, there'll
+	  # have to be another revision.... sigh.
 	*/
 #if defined(DB_VERSION_MAJOR)
 	if (sendmail_accessdb_file && strlen(sendmail_accessdb_file)) 
@@ -1170,29 +1239,18 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		/* lookup relay_ip_parts */
 		for(i=0;i<4;i++)
 		{
-			sprintf(connectbuf,"Connect:%s", relay_ip_parts[i]);
-			key.data = connectbuf;
-			key.size = strlen(key.data);
-			if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+			sprintf(connectbuf,"connect:%s", relay_ip_parts[i]);
+			if( access_query(connectbuf, "RELAY") )
 			{
-				if( strncmp(data.data,"RELAY",data.size) == 0 )
-				{
-					bypass_checks =1;
-					break;
-				}
+				bypass_checks = 1;
+				break;
 			}
 			if( !bypass_checks )
 			{
-				
-				key.data = relay_ip_parts[i];
-				key.size = strlen(key.data);
-				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				if( access_query(relay_ip_parts[i], "RELAY") )
 				{
-					if( strncmp(data.data,"RELAY",data.size) == 0 )
-					{
-						bypass_checks =1;
-						break;
-					}
+					bypass_checks = 1;
+					break;
 				}
 			}
 		}
@@ -1201,29 +1259,19 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			if( relay_name_parts[i][0] == 0 )
 				break;
 			
-			sprintf(connectbuf,"Connect:%s", relay_name_parts[i]);
-			key.data = connectbuf;
-			key.size = strlen(key.data);
-			if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+			sprintf(connectbuf,"connect:%s", relay_name_parts[i]);
+			if( access_query(connectbuf, "RELAY") )
 			{
-				if( strncmp(data.data,"RELAY",data.size) == 0 )
-				{
-					bypass_checks =1;
-					break;
-				}
+				bypass_checks = 1;
+				break;
 			}
 			if( !bypass_checks )
 			{
 				
-				key.data = relay_name_parts[i];
-				key.size = strlen(key.data);
-				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				if( access_query(relay_name_parts[i], "RELAY") )
 				{
-					if( strncmp(data.data,"RELAY",data.size) == 0 )
-					{
-						bypass_checks =1;
-						break;
-					}
+					bypass_checks = 1;
+					break;
 				}
 			}
 		}
@@ -1237,28 +1285,18 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			/* # check to see if there is a Spam: FRIEND/HATER entry */
 			if( !bypass_checks )
 			{
-				sprintf(connectbuf,"Spam:%s@%s", rcpt_acct,rcpt_domain);
-				key.data = connectbuf;
-				key.size = strlen(key.data);
-				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				sprintf(connectbuf,"spam:%s@%s", rcpt_acct,rcpt_domain);
+				if( access_query(connectbuf, "FRIEND") )
 				{
-					if( strncmp(data.data,"FRIEND",data.size) == 0 )
-					{
-						bypass_checks =1;
-					}
+					bypass_checks = 1;
 				}
 			}
 			if( !bypass_checks )
 			{
-				sprintf(connectbuf,"Spam:%s@", rcpt_acct);
-				key.data = connectbuf;
-				key.size = strlen(key.data);
-				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				sprintf(connectbuf,"spam:%s@", rcpt_acct);
+				if( access_query(connectbuf, "FRIEND") )
 				{
-					if( strncmp(data.data,"FRIEND",data.size) == 0 )
-					{
-						bypass_checks =1;
-					}
+					bypass_checks = 1;
 				}
 			}
 			for(i=0;!bypass_checks && i<40;i++)
@@ -1266,16 +1304,11 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				if( rcpt_domain_parts[i][0] == 0 )
 					break;
 				
-				sprintf(connectbuf,"Spam:%s", rcpt_domain_parts[i]);
-				key.data = connectbuf;
-				key.size = strlen(key.data);
-				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				sprintf(connectbuf,"spam:%s", rcpt_domain_parts[i]);
+				if( access_query(connectbuf, "FRIEND") )
 				{
-					if( strncmp(data.data,"FRIEND",data.size) == 0 )
-					{
-						bypass_checks =1;
-						break;
-					}
+					bypass_checks = 1;
+					break;
 				}
 			}
 			if( bypass_checks )
@@ -1283,8 +1316,6 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				writelog(1,"  Whitelisted Recipient match (%s) found in ACCESS DB.  Skipping checks and passing the mail.\n",
 						 rcpt_to);
 			}
-			
-			
 		}
 		/* 
 		   # We do not bypass the checks based on from addresses, because if they are blocked, they are handled by 
@@ -1892,6 +1923,9 @@ int main(int argc, char **argv)
 		}
 		memset(&key, 0, sizeof(key)); 
 		memset(&data, 0, sizeof(data));
+
+		print_access_contents();
+
 #endif
 	}
 	
