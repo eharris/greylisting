@@ -607,7 +607,9 @@ sfsistat eom_callback(SMFICTX *ctx)
 				        /* # This is done here rather than the rcpt callback since we don't know until now that
 				        #   the delivery is completely successful (not spam blocked or nonexistant user, or
 				        #   other failure out of our control) */
-					sprintf(commandbuf,"UPDATE relaytofrom SET record_expires = NOW() + INTERVAL %d SECOND  WHERE id = %s AND origin_type = 'AUTO'", update_record_life_secs, arr[i]);
+					sprintf(commandbuf,"UPDATE relaytofrom SET record_expires = NOW() + INTERVAL %d SECOND \
+WHERE id = %s AND origin_type = 'AUTO'", 
+							update_record_life_secs, arr[i]);
 					if( db_query(commandbuf, &result) )
 					{
 						if( pass_mail_when_db_unavail )
@@ -893,7 +895,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			if(p2)
 				*p2 = 0;
 		}
-		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (%s) ORDER BY length(relay_ip) DESC", subquery);
+		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom \
+WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (%s) ORDER BY length(relay_ip) DESC", 
+				subquery);
 		if( db_query(query, &result) )
 			goto DB_FAILURE;
 
@@ -980,7 +984,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			else 
 				break;
 		}
-		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND (%s) ORDER BY length(rcpt_to) DESC", subquery);
+		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom \
+WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND (%s) ORDER BY length(rcpt_to) DESC", 
+				subquery);
 		if( db_query(query, &result) )
 			goto DB_FAILURE;
 
@@ -1047,14 +1053,14 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		{
 			if( subquery[0] )
 				strcat(subquery," OR ");
-			strcat(subquery,"mail_from = '<");
+			strcat(subquery,"mail_from = '");
 			if( rcpt_acct[0] && i == 1)
 			{
 				strcat(subquery,from_acct);
 				strcat(subquery,"@");
 			}
 			strcat(subquery,buf2);
-			strcat(subquery,">'");
+			strcat(subquery,"'");
 			if( i > 1 )
 			{
 				p2 = strchr(buf2,'.');
@@ -1067,7 +1073,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 					break;
 			}
 		}
-		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) ORDER BY length(mail_from) DESC", subquery);
+		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom \
+WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) ORDER BY length(mail_from) DESC", 
+				subquery);
 		if( db_query(query, &result) )
 			goto DB_FAILURE;
 
@@ -1144,7 +1152,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 	/* Check to see if we already know this triplet set, and if the initial block is expired */
 
-	sprintf(query2,"SELECT id, NOW() > block_expires FROM relaytofrom WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'", mail_from, rcpt_to);
+	sprintf(query2,"SELECT id, NOW() > block_expires FROM relaytofrom 
+WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'", 
+			mail_from, rcpt_to);
 	if( do_relay_lookup_by_subnet )
 	{
 		char buf3[BUFSIZE],*p3;
@@ -1216,7 +1226,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		   put this stuff back in sometime */
 
 
-		sprintf(query2,"INSERT INTO relaytofrom (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) VALUES ('%s','%s','%s',NOW() + INTERVAL %d SECOND,NOW() + INTERVAL %d SECOND,  'AUTO', NOW())", relay_ip, mail_from, rcpt_to, delay_mail_secs, auto_record_life_secs);
+		sprintf(query2,"INSERT INTO relaytofrom (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time)\
+ VALUES ('%s','%s','%s',NOW() + INTERVAL %d SECOND,NOW() + INTERVAL %d SECOND,  'AUTO', NOW())",
+				relay_ip, mail_from, rcpt_to, delay_mail_secs, auto_record_life_secs);
 		if( db_query(query2, &result) )
 			goto DB_FAILURE;
 
@@ -1238,7 +1250,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		if( db_query("UNLOCK TABLE", &result) )
 			goto DB_FAILURE;
 
-		writelog(1,"  New mail row (%s,%s,%s) successfully inserted.  Issuing a tempfail.  rowid: %s\n", relay_ip, mail_from, rcpt_to, row_id);
+		writelog(1,"  New mail row (%s,%s,%s) successfully inserted.  Issuing a tempfail.  rowid: %s\n", 
+				 relay_ip, mail_from, rcpt_to, row_id);
 
 		goto DELAY_MAIL;
 	}
