@@ -89,6 +89,10 @@ my $relaydelay_pid_file = '/var/run/relaydelay.pid';
 #   once created, will exist until the milter is shutdown.  Each thread
 #   also consumes a database connection, so limiting db connections and
 #   memory footprint are both good reasons to set this.
+# If your mail server handles a large amount of mail, you may need to 
+#   increase this limit to avoid blocking, but the default limit is
+#   already pretty high, and should be sufficient for all but very 
+#   large sites.
 # Setting to zero makes the number of threads unlimited.
 my $maximum_milter_threads = 40;
 
