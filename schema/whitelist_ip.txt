@@ -47,6 +47,7 @@
 64.12.138       # AOL
 64.124.204.39	# moveon.org (unique sender per attempt)
 64.125.132.254  # collab.net (unique sender per attempt)
+#64.233.170	# gmail (common server pool)
 #65.82.241.160	# Groupwise?
 66.100.210.82	# Groupwise?
 66.135.209      # Ebay (for time critical alerts)
