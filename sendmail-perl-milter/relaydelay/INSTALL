@@ -34,7 +34,21 @@ To install:
    file somewhere.  It's probably already there if you're using another milter
    like amavis with spamassassin (which is recommended).
 
-4. Make sure the script has the execute bit set, and test the configuration by 
+4. If your mail system gets a mid- to large- amount of either spam or "real"
+   mail, you may also want to limit the number of sendmail children to a 
+   reasonable number if you haven't already done so.  The milter will spawn
+   as many copies of itself as it needs to to service all the concurrent 
+   sendmail processes, and the memory use could get quite large if a large
+   spam wave came in.  To limit this, add something like:
+
+   define(`confMAX_DAEMON_CHILDREN', `25')dnl
+
+   to your sendmail.mc.  Adjust the limit as appropriate for your normal
+   level of email.  Also make sure your database can handle more than 
+   this number of connections, as each copy of the milter has its own db 
+   connection.
+
+5. Make sure the script has the execute bit set, and test the configuration by 
    opening another window and running something similar to:
 
    relaydelay.pl myfilter /etc/mail/sendmail.cf 
@@ -44,7 +58,7 @@ To install:
 
    /usr/src/perl-5.8.0/perl relaydelay.pl myfilter /etc/mail/sendmail.cf
 
-5. After you see mail being processed and entries being created correctly,
+6. After you see mail being processed and entries being created correctly,
    then you probably want to make sure $verbose is turned off, and put 
    the startup of the script into your sendmail start script(s).
 
