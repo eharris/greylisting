@@ -13,6 +13,7 @@
 #include <stdarg.h>
 #include <db.h>   /* berkeley db package */
 #include "mysql.h"
+#include <time.h>
 
 int   verbose          = 1;
 char *database_type    = "mysql";
@@ -204,6 +205,15 @@ void writelog(int level, char *msg, ...) /* Brad provided this */
 	
 	if( verbose >= level )
 	{
+		/* print the TIME. This is getting more desirable! */
+		struct tm *timestrp;
+		time_t now = time(0);
+		timestrp = localtime(&now);
+		printf("%02d/%02d/%02d %02d:%02d:%02d ", 
+			   timestrp->tm_year-100 /* good until 2100...*/, 
+			   timestrp->tm_mon, timestrp->tm_mday, 
+			   timestrp->tm_hour, timestrp->tm_min, timestrp->tm_sec);
+		
         va_start(ap, msg);
         vprintf(msg, ap);
         va_end(ap);
@@ -1397,12 +1407,12 @@ WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (
 			strncpy(row_id, row[0], sizeof(row_id));
 			if( atoi(row[1]) )
 			{
-				writelog(1,"  Blacklisted Relay %s[%s]. Skipping checks and rejecting the mail.\n",relay_name, relay_ip);
+				writelog(1,"  Blacklisted Relay (%s[%s],%s,%s). Skipping checks and rejecting the mail.\n",relay_name, relay_ip, mail_from, rcpt_to);
 				goto DELAY_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
-				writelog(1,"  Whitelisted Relay %s[%s]. Skipping checks and passing the mail.\n",relay_name, relay_ip);
+				writelog(1,"  Whitelisted Relay (%s[%s],%s,%s). Skipping checks and passing the mail.\n",relay_name, relay_ip, mail_from, rcpt_to);
 				if( reverse_mail_tracking && strcasecmp(rcpt_mailer,"local"))
 					reverse_track(mail_from, rcpt_to);
 				goto PASS_MAIL;
@@ -1463,12 +1473,12 @@ WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND 
 			strncpy(row_id, row[0], sizeof(row_id));
 			if( atoi(row[1]) )
 			{
-				writelog(1,"  Blacklisted Recpt %s. Skipping checks and rejecting the mail.\n",rcpt_domain);
+				writelog(1,"  Blacklisted Recpt (%s,%s,%s). Skipping checks and rejecting the mail.\n",relay_ip, mail_from, rcpt_to);
 				goto DELAY_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
-				writelog(1,"  Whitelisted Recpt %s@%s. Skipping checks and passing the mail.\n", rcpt_acct, rcpt_domain);
+				writelog(1,"  Whitelisted Recpt (%s,%s,%s@%s). Skipping checks and passing the mail.\n", relay_ip, mail_from, rcpt_acct, rcpt_domain);
 				goto PASS_MAIL;
 			}
 		}
@@ -1552,12 +1562,12 @@ WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) O
 			strncpy(row_id, row[0], sizeof(row_id));
 			if( atoi(row[1]) )
 			{
-				writelog(1,"  Blacklisted Sender %s. Skipping checks and rejecting the mail.\n",mail_from);
+				writelog(1,"  Blacklisted Sender (%s,%s,%s). Skipping checks and rejecting the mail.\n",relay_ip,mail_from,rcpt_to);
 				goto DELAY_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
-				writelog(1,"  Whitelisted Sender %s. Skipping checks and passing the mail.\n", mail_from);
+				writelog(1,"  Whitelisted Sender (%s,%s,%s). Skipping checks and passing the mail.\n", relay_ip, mail_from,rcpt_to);
 				goto PASS_MAIL;
 			}
 		}
@@ -1585,12 +1595,12 @@ WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to = '%s' AND (%s) OR
 			strncpy(row_id, row[0], sizeof(row_id));
 			if( atoi(row[1]) )
 			{
-				writelog(1,"  Blacklisted Sender->Recipient pair %s->%s. Skipping checks and rejecting the mail.\n",mail_from,rcpt_to);
+				writelog(1,"  Blacklisted Sender->Recipient pair %s->%s. (ip=%s) Skipping checks and rejecting the mail.\n",mail_from,rcpt_to,relay_ip);
 				goto DELAY_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
-				writelog(1,"  Whitelisted Sender->Recipient pair %s->%s. Skipping checks and passing the mail.\n", mail_from, rcpt_to);
+				writelog(1,"  Whitelisted Sender->Recipient pair %s->%s. (ip=%s) Skipping checks and passing the mail.\n", mail_from, rcpt_to, relay_ip);
 				goto PASS_MAIL;
 			}
 		}
