@@ -1,0 +1,43 @@
+.greybox {
+	font-weight: bold;
+	font-family: Arial, Helvetica, sans-serif;
+	color: #cccccc;
+	background: #666666;
+	margin: 5px;
+	padding: 5px;
+	padding-right: 15px;
+	padding-left: 15px;
+	font-weight: bold;
+}
+
+.greybox:hover {
+	font-weight: bold;
+	font-family: Arial, Helvetica, sans-serif;
+	color: #666666;
+	background: transparent right center url(arrow.gif) no-repeat;
+	margin: 5px;
+	padding: 5px;
+	padding-right: 15px;
+	padding-left: 15px;
+	font-weight: bold;
+}
+
+a.boxlink {
+	color: #cccccc;
+	font-weight: bold;
+}
+
+/*
+p {
+	color: #333333;
+	font-family: Arial, Helvetica, sans-serif;
+}
+*/
+
+/*
+body { 
+	color: #333333;
+	font-family: Arial, Helvetica, sans-serif; 
+}
+*/
+

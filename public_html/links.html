@@ -1,0 +1,233 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+    "http://www.w3.org/TR/html4/loose.dtd">
+<html><head>
+<title>Greylisting Links</title>
+<meta http-equiv="Content-type" content="text/html; charset=iso-8859-1">
+<meta name="keywords" content="greylist, spam, control, blocking">
+<link rel="stylesheet" type="text/css" href="mystyle.css">
+</head>
+<body bgcolor="#FFFFFF" text="#333333" marginwidth="0" marginheight="0" leftmargin="0" topmargin="0">
+<table border="0" width="100%" cellpadding="0" cellspacing="0">
+<tr>
+  <td bgcolor="#666666" ><a href="index.html"><img src="logo.jpg" vspace="10" alt="" width="581" height="58" border="0"></a></td>
+</tr>
+<tr>
+  <td valign="TOP" bgcolor="#ffffff">
+     <table border="0" width="100%" cellpadding="0" cellspacing="0">
+     <tr>
+         <td valign="TOP" align="LEFT" bgcolor="#666666" width="150">
+                <p class="greybox"><a class="boxlink" href="index.html">Home</a></p>
+		<p class="greybox"><a class="boxlink" href="whitepaper.html">Whitepaper</a></p>
+		<p class="greybox"><a class="boxlink" href="downloads.html">Downloads</a></p>
+		<p class="greybox"><a class="boxlink" href="testimonials.html">Testimonials</a></p>
+		<p class="greybox"><a class="boxlink" href="mailinglists.html">Mailing Lists</a></p>
+		<p class="greybox"><a class="boxlink" href="links.html">Links</a></p>
+		<p class="greybox"><a class="boxlink" href="credits.html">Credits</a></p>
+        </td>
+	  <td valign="TOP" bgcolor="#666666" width="1">
+	    <img src="vertibar.gif"><br>
+	 </td>
+	  <td width="20"><!-- spacer --></td>
+	  <td valign="TOP"> <!-- content -->
+
+
+<h2>Links to Implementations and Information</h2>
+
+<p>
+To contact me about this project, you may send email to me at 
+<a href="mailto:eharris@puremagic.com">eharris@puremagic.com</a>.
+But, if the contact concerns using software implementing the idea,
+or ways of enhancing the method, the mailing lists might be more
+appropriate.
+</p>
+
+<p>
+If you are aware of any implementations not listed here, please contact me at 
+the above email address with a url and a short description, so it can be included
+here.
+</p>
+
+
+<h3>Sendmail:</h3>
+
+<p>
+My (Evan Harris') example implementation (also used for the inital testing) is called relaydelay, and is
+available from the <a href="downloads.html">Downloads</a> link.
+</p>
+
+<p>
+Development snapshots of relaydelay are also available from cvs at 
+<a href="http://cvs.puremagic.com/viewcvs/greylisting/">http://cvs.puremagic.com/viewcvs/greylisting/</a>.
+</p>
+
+<p>
+Morris Maynard has written some very helpful installation instructions for the relaydelay sendmail milter.  His pages are at
+<a href="http://www.maynidea.com/sendmail/relaydelay.html">http://www.maynidea.com/sendmail/relaydelay.html</a>.
+</p>
+
+<p>
+Chris Paul has notes about using the example implementation under OpenBSD 3.4 at
+<a href="http://www.sfobug.org/meeting_notes/chris_paul/greylist_openbsd.html">http://www.sfobug.org/meeting_notes/chris_paul/greylist_openbsd.html</a>
+</p>
+
+<p>
+Emmanuel Dreyfus has written an implementation of greylisting in standalone C/sendmail 
+milter that does not require perl or an external database.  
+His project is at <a href="http://hcpnet.free.fr/milter-greylist/">http://hcpnet.free.fr/milter-greylist/</a>.
+</p>
+
+<p>
+Anthony Howe has an alternate Sendmail perl milter using Berkeley DB.  Info is at
+<a href="http://www.snert.com/Software/milter-gris/">http://www.snert.com/Software/milter-gris/</a>
+</p>
+
+
+
+<h3>Exim:</h3>
+
+<p>
+Martin Dempsey has developed a Greylisting implementation for Exim 4.x.  It is available at 
+<a href="http://www.digitaleveryware.com/projects/greylisting/">http://www.digitaleveryware.com/projects/greylisting/</a>.
+</p>
+
+<p>
+Roman Festchook is also working on an implementation for Exim.  It is at
+<a href="http://noc.polesye.net/greylist/">http://noc.polesye.net/greylist/</a><br>
+WARNING: This appears to be a dead link.
+</p>
+
+<p>
+Marc Merlin has a new implementation using Spamassassin with Exim.  There's documentation for it at 
+<a href="http://marc.merlins.org/linux/exim/files/sa-exim-cvs/README.greylisting">http://marc.merlins.org/linux/exim/files/sa-exim-cvs/README.greylisting</a>.  
+The base link is <a href="http://marc.merlins.org/linux/exim/sa.html">here</a> 
+and a diff is <a href="http://marc.merlins.org/linux/exim/files/sa-exim-cvs/SA-greylisting.diff">here</a>.
+</p>
+
+<p>
+Alun Jones has created a perl filter for Exim that is in use at the University of Wales.  His page at 
+<a href="http://users.aber.ac.uk/auj/spam/">http://users.aber.ac.uk/auj/spam/</a> has links to source and 
+a nice Powerpoint presentation that has a graph of the method's effectiveness.
+</p>
+
+<p>
+Tollef Fog Heen has an in-Exim implementation using PostgresSQL.  Information on it is at
+<a href="http://raw.no/personal/blog/tech/Debian/2004-03-14-15-55_greylisting">http://raw.no/personal/blog/tech/Debian/2004-03-14-15-55_greylisting</a>
+</p>
+
+<p>An unidentified person has another implementation for Exim and Mysql, based on Tollef's implementation.  Info is at
+<a href="http://theinternetco.net/projects/exim/greylist">http://theinternetco.net/projects/exim/greylist</a>
+</p>
+
+
+<h3>Qmail:</h3>
+
+<p>
+Martin Dempsey has developed a Greylisting implementation for Exim 4.x that should also work with Qmail.  It is available at
+<a href="http://www.digitaleveryware.com/projects/greylisting/">http://www.digitaleveryware.com/projects/greylisting/</a>.
+</p>
+
+
+
+<h3>Qpsmtpd:</h3>
+
+<p>
+Gavin Carr has implemented a greylisting plugin for <a href="http://develooper.com/code/qpsmtpd/">Qpsmtpd</a> 
+(a perl based replacement for qmail-smtpd).  The plugin is available at 
+<a href="http://www.openfusion.com.au/labs/dist/denysoft_greylist">http://www.openfusion.com.au/labs/dist/denysoft_greylist</a>.
+</p>
+
+
+
+<h3>Postfix:</h3>
+
+<p>
+Wietse Venema (author of Postfix) has made modifications to Postfix to support a form of Greylisting.  Information
+on it is available at <a href="http://www.postfix.org/SMTPD_POLICY_README.html#greylist">http://www.postfix.org/SMTPD_POLICY_README.html#greylist</a>.
+</p>
+
+<p>
+David Schweikert has written a perl based enhancement for the Postfix policy server.  Information is available from
+<a href="http://isg.ee.ethz.ch/tools/postgrey/">http://isg.ee.ethz.ch/tools/postgrey/</a>
+</p>
+
+<p>
+Salim Gasmi has written a C based implementation of Greylisting for Postfix.  It is available from 
+<a href="http://www.gasmi.net/gld.html">http://www.gasmi.net/gld.html</a>
+</p>
+
+<p>
+Michael Moritz has another Postfix implementation, written in C/C++ and using DBI/Mysql.  It is available from
+<a href="http://mimo.gn.apc.org/gps/">http://mimo.gn.apc.org/gps/</a>
+</p>
+
+
+<h3>Squirrelmail:</h3>
+
+<p>
+Jason Frisvold has written a plugin for Squirrelmail.  It is available from
+<a href="http://www.godshell.com/toaster/">http://www.godshell.com/toaster/</a>
+</p>
+
+<h3>Mail Proxies:</h3>
+
+<p>
+Graham Toal has written a man-in-the-middle mail relay daemon implementing Greylisting 
+(among other things).  The code is at 
+<a href="http://www.gtoal.com/spam/smtpfilter.c">http://www.gtoal.com/spam/smtpfilter.c</a>.  
+A nice html version is <a href="http://www.gtoal.com/spam/smtpfilter.c.html">here</a>.
+</p>
+
+<p>
+David Parsons has written a simple mailserver and client using greylisting.  His page is at 
+<a href="http://www.pell.portland.or.us/~orc/Code/postoffice/">http://www.pell.portland.or.us/~orc/Code/postoffice/</a>.
+</p>
+
+<p>
+David Given has written a mail proxy called spey.  It is hosted at sourceforge.  Here is the
+<a href="http://spey.sourceforge.net/">spey homepage</a>.
+</p>
+
+
+<h3>Others:</h3>
+
+<p>
+Vernon Schryver has added a form of Greylisting to the Distributed Checksum Clearinghouse (DCC).  More info is at
+<a href="http://www.rhyolite.com/anti-spam/dcc/greylist.html">http://www.rhyolite.com/anti-spam/dcc/greylist.html</a>
+</p>
+
+<p>
+James has made a Howto on using Greylisting with spamd on OpenBSD 3.5.  The page is at
+<a href="http://www.elwood.net/greyspamd.html">http://www.elwood.net/greyspamd.html</a>
+</p>
+
+
+<hr>
+<h2>Links to commercial products</h2>
+
+<p>
+Commercial products incorporating varying forms of the greylisting method are starting to become available.  Here are a few links.
+</p>
+
+<p>
+<a href="http://www.canit.ca/releases.php">CanIt Mail Server Software Release Info</a>
+</p>
+
+<p>
+<a href="http://www.isode.com/press/pr-antispam102.html">Isode Press Release</a>
+</p>
+
+<p>
+<a href="http://www.mirapoint.com/">Mirapoint Email Appliances</a>
+</p>
+
+
+        </td>
+	  <td width="20"><!-- spacer --></td>
+     </tr>
+     </table>
+  </td>
+</tr>
+</table>
+
+</body>
+</html>
