@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <libmilter/mfapi.h>
 #include <regex.h>
 #include <pthread.h>
@@ -81,6 +82,49 @@ int  check_wildcard_mail_from = 1;
 */
 int  tempfail_messages_after_data_phase = 0;
 
+char *tfail_messages[] = {"Traffic Overload--Try again in a few minutes",
+			"Mail system reset; Sorry, try again",
+			"Temporary Failure -- Reason: Unknown. Please Retry",
+			"Too many Threads, retry in one hour",
+			"Traffic Jam. Avoid Rush Hour. Wait and send again, please",
+			"Temporary Failure. Resend after a short wait period",
+			"Busy. Send again sometime.",
+			"System is washing its hair. Call back after it has time to blow-dry.",
+			"System Maintenance Cycle, retry in a few minutes",
+			"Max Simultaneous incoming message limit reached. Wait your turn",
+			"I am overloaded, Dave. I cannot handle all this. Come back later",
+			"System Stress Limit reached. Try again after it has a chance to take some Valium",
+			"Connection Lost. Fix problem and retry.",
+			"MTA potty break. Wait and retry",
+			"Mail system watering flowers. Come back after it is finished.",
+			"Internet connection slow right now. Try again shortly.",
+			"Site temporarily under Construction. Retransmit message, please",
+			"This site possibly under DOS attack. Please wait and retransmit letter",
+			"Your message is valuable to us. Please retransmit in a while",
+			"Message Header garbled-- please retransmit",
+			"Mail system busy flirting with other relay. Try again later",
+			"Message dropped. We hate it when this happens. Please retransmit",
+			"Some kind of problem encountered. Try sending again.",
+			"Mail system Stressed. Give it time for yoga, then try again",
+			"MTA slipped and fell. Retransmit message, please",
+			"MTA tripped. Retransmit letter after it brushes itself off",
+			"Internal error. Try retransmitting message.",
+			"Your message is good, but our relay is slow. Try sending again",
+			"MTA temp failure. Retransmit, please",
+			"Mail system bogged down-- retransmit your message, please",
+			"System Admin out to lunch, wait and resend message.",
+			"Sorry, Mail system rebooting. Retransmit message in a few minutes",
+			"Thank you for your patience. Our system is still having problems. Please retry",
+			"System chewing big message. Try retransmitting after it is swallowed!",
+			"Regularly scheduled system nap time. Resend message after it wakes up",
+			"Queue limit reached. Retransmit message later",
+			"System load limit reached. Wait and Retransmit message.",
+			"Pretty girl in computer room. Mail System locked up. retransmit later.",
+			"MTA is farding. It will be pretty in a few minutes. Retransmit then.",
+			"Spam overload. Temporary failure. Retransmit message in a minute or two.",
+			"Grumpy MTA temporarily out of service. Resend message in an hour."
+			};
+int tfail_msg_cnt = sizeof(tfail_messages)/sizeof(char*);
 /*
 # Set this to a nonzero value if you wish to do triplet lookups disregarding
 #   the last octet of the relay ip.  This helps workaround the case of
@@ -291,8 +335,19 @@ void print_access_contents(void)
 
 
 #endif
-
-
+static seeded = 0;
+char *tfail_msg(void)
+{
+	time_t x = time(0);
+	int ind;
+	if( !seeded )
+	{
+		srand((int)x);
+		seeded = 1;
+	}
+	ind = rand() % tfail_msg_cnt;
+	return tfail_messages[ind];
+}
 
 /* ############################################################# */
 MYSQL global_dbh;
@@ -342,7 +397,8 @@ int load_config(void)
 		printf("  relaydelay_pid_file = %s\n", relaydelay_pid_file);
 		printf("  maximum_milter_threads = %d\n", maximum_milter_threads);
 		printf("  reverse_mail_tracking = %d\n", reverse_mail_tracking);
-		printf("  reverse_mail_life_secs = %d (%g hrs)\n\n", reverse_mail_life_secs, (double)(reverse_mail_life_secs)/3600.0);
+		printf("  reverse_mail_life_secs = %d (%g hrs)\n", reverse_mail_life_secs, (double)(reverse_mail_life_secs)/3600.0);
+		printf("  %d different failure messages\n\n", tfail_msg_cnt);
 		fflush(stdout);
 	}
 	return 0;
@@ -836,7 +892,7 @@ sfsistat eom_callback(SMFICTX *ctx)
 			 * milter being inaccessible/timing out.
 			 */
 			writelog(1,"EOM: Rowids=%s mail_from=%s\n", rowids, mail_from);
-			smfi_setreply(ctx, "451", "4.7.1", "Please try again later (TEMPFAIL)") ;
+			smfi_setreply(ctx, "451", "4.7.1", tfail_msg()) ;
 			return SMFIS_TEMPFAIL;
 
 		}
@@ -1023,6 +1079,16 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 	row_id[0] = 0;
 	rcpt_to = argv[0];
+
+        if( check_envelope_address_format )
+        {
+                if( strlen(rcpt_to) > 254 )
+                {
+                        smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope To: address: Way, way, wa
+y too long. Buffer Overflow Exploit Attempt?");
+                        return SMFIS_REJECT;
+                }
+	}
 
 	if( privdata_ref )
 	{
@@ -1307,8 +1373,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		}
 		if( bypass_checks )
 		{
-			writelog(1,"  Whitelisted Relay match (%s/%s) found in ACCESS DB.  Skipping checks and passing the mail.\n",
-					 relay_ip,relay_name?relay_name:"(nil)");
+			writelog(1,"  Whitelisted Relay match (%s/%s) [%s,%s] found in ACCESS DB.  Skipping checks and passing the mail.\n",
+					 relay_ip,relay_name?relay_name:"(nil)",mail_from, rcpt_to);
 		}
 		else
 		{
@@ -1343,8 +1409,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			}
 			if( bypass_checks )
 			{
-				writelog(1,"  Whitelisted Recipient match (%s) found in ACCESS DB.  Skipping checks and passing the mail.\n",
-						 rcpt_to);
+				writelog(1,"  Whitelisted Recipient match (%s) [%s,%s] found in ACCESS DB.  Skipping checks and passing the mail.\n",
+						 rcpt_to, relay_ip, mail_from);
 			}
 		}
 		/* 
@@ -1789,7 +1855,7 @@ WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'",
 	privdata_ref = 0;
 
 	/* Set the reply code to a unique message (for debugging) - this dsn is what is normally the default */
-	smfi_setreply(ctx, "450", "4.3.2", "Please try again later (TEMPFAIL)");
+	smfi_setreply(ctx, "450", "4.3.2", tfail_msg());
 
 	/* Issue a temporary failure for this message.  Connection may or may not continue. */
 	return SMFIS_TEMPFAIL;
