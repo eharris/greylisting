@@ -3,6 +3,18 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2003-07-13 - NEW OPTION - Added a config option to limit the number of 
+    threads the milter will spawn.  Once a thread is spawned it will continue
+    to exist until the milter is shutdown.  Since each thread increases the
+    memory footprint, and consumes a db connection, this is a good way to 
+    limit both.
+
+  2003-07-12 - Fixed a small problem where bounce messages were not properly
+    expired as they should be.  Also fixed some minor warnings.
+
+  2003-07-11 - Backed out changes for trying to fix the accounting error of
+    a few days ago.  The "solution" caused more trouble  than the problem.
+
   2003-07-10 - NEW OPTION - Added a new feature to automatically 
     pre-whitelist recipients of locally generated outbound mail.  Mail that 
     is relayed for another IP-wildcard whitelisted host, or sent from an 
