@@ -258,7 +258,13 @@ my $config_loaded;
 sub db_connect($) {
   my $verbose = shift;
 
-  return $global_dbh if (defined $global_dbh);
+  if (defined($global_dbh)) {
+    return $global_dbh;
+    # This helps detect db connection problems faster, but it causes a lot of
+    # unneccessary traffic/latency if the db is not on the local server.  
+    # I don't think it's worth it, but it's left here if its desired.
+    #return $global_dbh if ($global_dbh->ping());
+  }
 
   my $dsn = "DBI:$database_type:database=$database_name:host=$database_host:port=$database_port";
   print "DBI Connecting to $dsn\n" if $verbose;
@@ -400,7 +406,7 @@ sub eom_callback
 
   print "  IN EOM CALLBACK - PrivData: " . ${$privdata_ref} . "\n" if ($verbose);
 
-  my $dbh = db_connect(0) or goto DB_FAILURE;
+  my $dbh = db_connect($verbose) or goto DB_FAILURE;
 
   # parse and store the data
   my $rowids;
@@ -503,7 +509,7 @@ sub abort_callback
   #   (this means we didn't expect/cause an abort, but something else did)
   if (substr($rowids, 0, 1) ne '0') {
     # Ok, we need to update the db, so get a handle
-    my $dbh = db_connect(0) or goto DB_FAILURE;
+    my $dbh = db_connect($verbose) or goto DB_FAILURE;
   
     # split up the rowids and update each in turn
     my @rowids = split(",", $rowids);
@@ -561,7 +567,10 @@ sub reverse_track($$$)
   # Note the reversed from and to fields! 
   $sth->execute($rcpt_to, $mail_from) or return;
   my $rowid = $sth->fetchrow_array();
-  my $nextrowid = $sth->fetchrow_array();
+  my $nextrowid;
+  if (defined($rowid)) {
+    $nextrowid = $sth->fetchrow_array();
+  }
   $sth->finish();
 
   if (defined($rowid) and !defined($nextrowid)) {
@@ -627,7 +636,7 @@ sub envrcpt_callback
   print "Passed Recipient: $rcpt_to\n" if ($verbose);
 
   # Get the database handle (after got the privdata)
-  my $dbh = db_connect(0) or goto DB_FAILURE;
+  my $dbh = db_connect($verbose) or goto DB_FAILURE;
   
   #print "my_envrcpt:\n";
   #print "   + args: '" . join(', ', @args) . "'\n";
