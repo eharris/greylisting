@@ -5,20 +5,12 @@
 
 <CENTER><H1>The Next Step in the Spam Control War: Greylisting<BR>
 By Evan Harris</H1>
-<H5>Copyright &copy; 2003, all rights reserved.</H5>
+<H5>Copyright &copy; 2003.  Permission to reprint and translate is granted provided this copyright notice is kept intact.</H5>
 </CENTER>
 <P>
 
-<H4><font color=red>
-Notice: there are now mailing lists for announcements and users/developers
-of software implementing the Greylisting method.  Please see 
-<A HREF="http://lists.puremagic.com/cgi-bin/mailman/listinfo/greylist-announce">Greylist-announce</A> and 
-<A HREF="http://lists.puremagic.com/cgi-bin/mailman/listinfo/greylist-users">Greylist-users</A>
-if you wish to subscribe.
-</font></H4>
-
 <P>
-Updated: 2003-07-08
+Revised: 2003-08-21
 <P>
 
 <H4>Introduction</H4>
@@ -61,12 +53,15 @@ a link below, and as other implementations or additional utility code
 become available, they will also be linked.
 <P>
 
-Greylisting has been tested on a few small scale mail hosts (less than 100 users,
+Greylisting was originally tested on a few small scale mail hosts (less than 100 users,
 though with a fairly diverse set of senders from all over the world, and volumes
-over 10,000 email attempts a day), however it is designed to be scalable, as well
-as low impact to both administrators and users, and should be acceptable
-for use on a wide range of systems, including those of very large scale.
-Of course, performance issues are very dependent on implementation details.
+over 10,000 email attempts a day).  It was designed to be scalable and low impact to
+both administrators and users, and should be acceptable for use on a wide range of 
+systems.  Of course, performance issues are very dependent on implementation details.
+<P>
+
+Currently, Greylisting is in use on many mail servers, including ones processing
+several millions of messages per day.  And more are being added every day.
 <P>
 
 The Greylisting method proposed in this paper is a complementary method to other
@@ -78,7 +73,7 @@ attempting to do so.
 <P>
 
 The great thing about Greylisting is that
-the only methods of circumventing it will only make other spam control 
+the only methods of circumventing it will tend to make other spam control 
 techniques just that much more effective (primarily DNS and other methods 
 of blacklisting based on IP address) even after this adaptation by the 
 spammers has occurred.
@@ -122,14 +117,22 @@ an appropriate temporary failure code for a delivery attempt (see below for
 discussion of issues concerning non-conforming MTA's).
 <P>
 
-During the initial testing of Greylisting, it was observed that the vast majority 
-of spam appears to be sent from applications designed specifically for spamming.
+During the initial testing of Greylisting in mid-2003, it was observed that the 
+vast majority of spam appears to be sent from applications designed specifically 
+for spamming.
 These applications appear to adopt the "fire-and-forget" methodology.  That is, 
 they attempt to send the spam to one or several MX hosts for a domain, but then 
 never attempt a true retry as a real MTA would.  From our testing, this means that 
-currently, based on a fairly conservative interpretation of testing data,
-we see effectiveness of over 95%, and that is with no legitimate mail ever 
+in the test environment, based on a fairly conservative interpretation of testing data,
+we have attained an effectiveness of over 95%, and that is with no legitimate mail ever 
 being permanently blocked.
+<P>
+
+In addition, with the recent rampant proliferation of email-based viruses, 
+Greylisting has been shown to be extremely effective in blocking these viruses, 
+as they also do not tend to retry deliveries.  And since these viruses are fairly
+large, bandwidth and processing savings are significant versus the standard method 
+of accepting delivery and local virus scanning.
 <P>
 
 This blocking comes with a minimal price from the terms of local resources.
@@ -293,13 +296,27 @@ in the case of a SMTP callback, doing so at that point may cause our outgoing ma
 to be delayed unnecessarily.
 <P>
 
-Luckily, the mailers that do this use a sender address of the null sender "&lt;&gt;"
+Luckily, most mailers that do this use a sender address of the null sender "&lt;&gt;"
 to perform this check.  This makes it fairly simple to workaround, since we
 can make a modification to the handling process so that 
 in the special case of the null sender, we delay returning a temporary failure 
 until after the DATA phase of a mail transaction.  Since SMTP callbacks abort their 
 test delivery attempt before getting to the data phase, the SMTP callback 
 will succeed, and the outgoing mail should be accepted with no delay.
+<P>
+
+One mailer that seems to have a related problem is Postfix.  Postfix breaks from the
+normal procedure of using the null sender for its callbacks, and instead uses a 
+configurable sender address in the callback.  I tried to get an explanation as to
+why Postfix didn't use the null sender like everyone else, and was informed that it
+was because some broken mailers don't accept the null sender even though it is 
+required in the SMTP RFCs.  However, since Exim and others don't seem to have a 
+problem with it, it is hard to believe that that is the reason.
+<P>
+
+Unfortunately, this causes a problem when trying to work around the wierd behavior 
+of Postfix.  Luckily, the default setting for this address seems to be "postmaster",
+which leads to an acceptable workaround.
 <P>
 
 Another issue occurs when a large organization uses a pool of outbound mail 
@@ -343,12 +360,18 @@ document, which is to use the same unique envelope sender for every mail sent to
 particular recipient.
 <P>
 
-However, some mailing lists also try to track bounces to individual mails, rather 
+However, some mailing lists (such as <A HREF="www.ezmlm.org">Ezmlm</A>) also try to 
+track bounces to individual mails, rather 
 than just individual recipients, which creates a variation on the VERP method where 
 each email has it's <I>own unique</I> envelope sender.  Since the automatic whitelisting 
 that is built into Greylisting depends on the envelope addresses for subsequent 
 emails being the same, 
 this will cause each email sent to be delayed, rather than just the first email.
+<P>
+
+While tracking individual bounces may sound like a good idea, in todays internet
+age when we are trying to authenticate the senders of email, it's probably a
+bad idea.  Hopefully, the Ezmlm maintainers will correct this issue.
 <P>
 
 There is a simple workaround, which is to manually whitelist any hosts that deliver 
@@ -910,6 +933,9 @@ Gavin Carr has implemented a greylisting plugin for <A HREF="http://develooper.c
 <A HREF="http://www.openfusion.com.au/labs/dist/denysoft_greylist">http://www.openfusion.com.au/labs/dist/denysoft_greylist</A>.
 <P>
 
+Wietse Venema (author of Postfix) has made modifications to Postfix to support a form of Greylisting.  The announcement is
+<A HREF="http://archives.neohapsis.com/archives/postfix/2003-07/1219.html">here</A>.
+
 More to come...
 <P>
 
@@ -946,6 +972,10 @@ Thanks to Charles Ying for developing Sendmail::Milter which made this project a
 a whole slew of other developers for producing Sendmail, Mysql, Perl, Amavis, and Spamassassin, and
 all the administrators and people who help maintain various blacklists and other anti-spam software
 and databases that have helped in keeping email from becoming useless.
+<P>
+
+<P>
+If you are interested in the paper in its original first published form, the original can be found <A HREF="http://cvs.puremagic.com/viewcvs/*checkout*/greylisting/public_html/index.html?rev=1.1">here</A>.
 <P>
 
 <CENTER>
