@@ -37,6 +37,29 @@ create table relaytofrom     # Stores settings for each [relay, to, from] triple
         key(rcpt_to(20))
 );
 
+# This is just an exact duplicate of the relaytofrom table with a different name for reporting purposes
+create table relayreport     # Stores settings for each [relay, to, from] triplet
+(
+        id              bigint          NOT NULL        auto_increment, # unique triplet id
+        relay_ip        char(16),                                       # sending relay in IPV4 ascii dotted quad notation
+        mail_from       varchar(255),                                   # ascii address of sender
+        rcpt_to         varchar(255),                                   # the recipient address.
+        block_expires   datetime        NOT NULL,                       # the time that an initial block will/did expire
+        record_expires  datetime        NOT NULL,                       # the date after which this record is ignored
+        
+        blocked_count   bigint          default 0 NOT NULL,             # num of blocked attempts to deliver
+        passed_count    bigint          default 0 NOT NULL,             # num of passed attempts we have allowed
+        aborted_count   bigint          default 0 NOT NULL,             # num of attempts we have passed, but were later aborted
+        origin_type     enum('MANUAL','AUTO') NOT NULL,                 # indicates the origin of this record (auto, or manual)
+        create_time     datetime        NOT NULL,                       # timestamp of creation time of this record
+        last_update     timestamp       NOT NULL,                       # timestamp of last change to this record (automatic)
+
+        primary key(id),
+        key(relay_ip),
+        key(mail_from(20)),                                             # To keep the index size down, only index first 20 chars
+        key(rcpt_to(20))
+);
+
 create table dns_name        # Stores the reverse dns name lookup for records
 (
        relay_ip      varchar(18)       NOT NULL,
