@@ -38,7 +38,11 @@ my $update_record_life = 1;
 # How much life (in secs) to give to a record we are updating from an
 #   allowed (passed) email.  Only useful if update_record_life is
 #   enabled.
-my $update_record_life_secs = 30 * 24 * 3600;  # 30 days
+# The default is 36 days, which should be enough to handle messages that
+#   may only be sent once a month, or on things like the first tuesday
+#   of the month (which sometimes means 5 weeks).  Plus, we add a day
+#   in case the message gets sent at a different time of day.
+my $update_record_life_secs = 36 * 24 * 3600;
 
 my $blacklist_check_relay_ip = 1;
 my $whitelist_check_relay_ip = 1;
@@ -46,6 +50,12 @@ my $whitelist_check_recipient = 1;
 my $whitelist_check_sender = 1;
 my $whitelist_check_sender_domain = 1;
 
+# Set this to a postive number to slow down responses to blocked connections
+#   by a random number of seconds up to this value (a simple way to tarpit
+#   probable spammers connections)
+#   NOTE: The sendmail settings for this milter must be long enough so this 
+#   delay plus the normal processing time doesn't cause a timeout)
+my $blocked_response_delay_secs = 30;
 
 
 # Global vars
@@ -118,6 +128,7 @@ sub DoStatement($)
   my $dbh = db_connect(0);
   die "$DBI::errstr\n" unless($dbh);
   my $rows_affected = $dbh->do($query);
+  return $rows_affected;
 }
 
 
@@ -178,27 +189,24 @@ sub eom_callback
     $rcpt_to = $3;
   }
   
-  # only do further processing if got and parsed the privdata
-  if (defined $rowids) {
-    # If and only if this message is from the null sender, check to see if we should delay it
-    #   (since we can't delay it after rcpt_to since that breaks exim's recipient callbacks)
-    #   (We use a special rowid value of 00 to indicate a needed block)
-    if ($mail_from eq "<>" && $rowids eq "00") {
-      # Set the reply code to the normal default, but with a modified text part.
-      $ctx->setreply("451", "4.7.1", "Please try again later (TEMPFAIL)");
-     
-      # Issue a temporary failure for this message.  Connection may or may not continue.
-      return SMFIS_TEMPFAIL;
-    }
+  # If and only if this message is from the null sender, check to see if we should tempfail it
+  #   (since we can't delay it after rcpt_to since that breaks exim's recipient callbacks)
+  #   (We use a special rowid value of 00 to indicate a needed block)
+  if ($mail_from eq "<>" && $rowids eq "00") {
+    # Set the reply code to the normal default, but with a modified text part.
+    $ctx->setreply("451", "4.7.1", "Please try again later (TEMPFAIL)");
+    
+    # Issue a temporary failure for this message.  Connection may or may not continue.
+    return SMFIS_TEMPFAIL;
+  }
 
-    # Only if we have some rowids, do we do db updates
-    if ($rowids > 0) {
-      # split up the rowids and update each in turn
-      my @rowids = split(",", $rowids);
-      foreach my $rowid (@rowids) {
-        DoStatement("UPDATE relaytofrom SET passed_count = passed_count + 1 WHERE id = $rowid");
-        print "  * Mail successfully processed.  Incremented passed count on rowid $rowid.\n";
-      }
+  # Only if we have some rowids, do we update the count of passed messages
+  if ($rowids > 0) {
+    # split up the rowids and update each in turn
+    my @rowids = split(",", $rowids);
+    foreach my $rowid (@rowids) {
+      DoStatement("UPDATE relaytofrom SET passed_count = passed_count + 1 WHERE id = $rowid");
+      print "  * Mail successfully processed.  Incremented passed count on rowid $rowid.\n";
     }
   }
 
@@ -243,13 +251,24 @@ sub abort_callback
     $rcpt_to = $3;
   }
   
-  # only do further processing if have some rowids
+  # only increment the aborted_count if have some rowids 
+  #   (this means we didn't expect/cause an abort, but something else did)
   if ($rowids > 0) {
     # split up the rowids and update each in turn
     my @rowids = split(",", $rowids);
     foreach my $rowid (@rowids) {
       DoStatement("UPDATE relaytofrom SET aborted_count = aborted_count + 1 WHERE id = $rowid");
       print "  * Mail was aborted.  Incrementing aborted count on rowid $rowid.\n";
+
+      # Check for the special case of no passed messages, means this is probably a 
+      #   spammer, and we should expire the record so they have to go through the
+      #   whitelisting process again the next time they try.  BUT ONLY IF THIS
+      #   IS AN AUTO RECORD.
+      if (DoSingleValueQuery("SELECT passed_count = 0 FROM relaytofrom WHERE id = $rowid AND origin_type = 'AUTO'")) {
+        # This is such a record, so update the expire time to now
+        DoStatement("UPDATE relaytofrom SET record_expires = NOW() WHERE id = $rowid");
+        print "  * Mail record had no successful deliveries.  Expiring record on rowid $rowid.\n";
+      }
     }
   }
 
@@ -335,6 +354,10 @@ sub envrcpt_callback
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n";
     goto PASS_MAIL;
   }
+
+  # Check for local IP relay whitelisting from the access file
+  # FIXME - needs to be implemented
+  #
 
   # Check for relay ip blacklisting or whitelisting (by host or net)
   if ($blacklist_check_relay_ip || $whitelist_check_relay_ip) {
@@ -519,6 +542,9 @@ sub envrcpt_callback
       }
       # If this record was automatic, then update the lifetime (if configured that way)
       elsif ($update_record_life) {
+        # FIXME - This should probably be moved to the eom callback, so we only do it if the 
+        #   delivery is completely successful (not spam blocked or nonexistant user, or other
+        #   failure out of our control)
         DoStatement("UPDATE relaytofrom SET record_expires = NOW() + INTERVAL $update_record_life_secs SECOND WHERE id = $rowid");
       }
     }
