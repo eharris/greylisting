@@ -3,6 +3,8 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2004-05-28 - Added a config option to check for stale db handles.
+
   2004-05-22 - Included two little utilities to do simple queries on the db
     and easily add white/blacklist entries.
 
