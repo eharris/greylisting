@@ -11,7 +11,7 @@
 #include <regex.h>
 #include <pthread.h>
 #include <stdarg.h>
-
+#include <db.h>   /* berkeley db package */
 #include "mysql.h"
 
 int   verbose          = 1;
@@ -23,15 +23,14 @@ char *database_user    = "milter";
 char *database_pass    = "password";
 char *config_file_name = "/etc/mail/relaydelay.conf";
 
+/* FOR THE ACCESS DB QUERIES */
+DB *dbp; 
+DBT key, data;
+
+
 #define BUFSIZE          4096
 #define SAFESIZ          4095
 #define MAX_QUERY_TRIES  1
-
-/*
-# This determines how many seconds we will block inbound mail that is
-#   from a previously unknown [ip,from,to] triplet.
-*/
-int delay_mail_secs = 3600;
 
 /*
 # This determines how many seconds of life are given to a record that is
@@ -121,10 +120,93 @@ int check_envelope_address_format = 1;
 */
 int pass_mail_when_db_unavail = 0;
 
+/* NEW---------------
+   # This parameter determines how the milter interfaces with the libmilter
+   #   API.  Normally, if using a milter on the same machine that is running
+   #   sendmail, it will be something like 'local:/var/run/relaydelay.sock', 
+   #   but if you want to run the milter on a different machine than is running 
+   #   sendmail, you will need to specify how to connect to that copy of 
+   #   sendmail by setting this to indicate the machine and port that the 
+   #   remote sendmail is listening for connections on with something 
+   #   similar to 'inet:2526@sendmail.server.org'.
+   # This parameter must match the S= option in the INPUT_MAIL_FILTER
+   #   definition in the sendmail.mc file.
+   # for IP connections: 	"inet:9876@localhost" may work nicely!!!
+*/
+
+char *milter_socket_connection = "local:/var/run/relaydelay.sock";
+
+/*
+  # This config option specifies where sendmail's access.db file is located.  
+  #   If you don't want the milter to check the access.db, just set this equal 
+  #   to undef.
+  # If enabled, the access db will be checked to see if there are matching
+  #   ip or address entries that should make us bypass the greylist checks.
+  # NOTE: These checks assume that the sendmail FEATURE(`relay_hosts_only') 
+  #   is not enabled.  If you do have that enabled, the checks in the milter
+  #   will be more permissive than you want.
+  #   In addition, the milter will heed entries in the access db even if
+  #   your sendmail configuration doesn't check certain types, so make sure
+  #   you don't have any entries that sendmail will ignore unless you want 
+  #   to suffer the consequences.
+  #   For more information on access db options, see:
+  #     http://www.sendmail.org/~ca/email/doc8.12/cf/m4/anti_spam.html
+  #   For additional information, please also see the README file.
+  #
+  #char *sendmail_accessdb_file = 0;
+*/
+char *sendmail_accessdb_file = "/etc/mail/access.db";
+
+/* # Where the pid file should be stored for relaydelay */
+char *relaydelay_pid_file = "/var/run/relaydelay.pid";
+
+/* # Set this to something nonzero to limit the number of children that the 
+   #   milter will spawn.  Since children are never recycled (there seems 
+   #   to be a problem doing that with Sendmail::Milter), threads,
+   #   once created, will exist until the milter is shutdown.  Each thread
+   #   also consumes a database connection, so limiting db connections and
+   #   memory footprint are both good reasons to set this.
+   # If your mail server handles a large amount of mail, you may need to 
+   #   increase this limit to avoid blocking, but the default limit is
+   #   already pretty high, and should be sufficient for all but very 
+   #   large sites.
+   # Setting to zero makes the number of threads unlimited.
+*/
+int maximum_milter_threads = 40;
+
+/*# This determines how many seconds we will block inbound mail that is
+  #   from a previously unknown [ip,from,to] triplet.  If it is set to
+  #   zero, incoming mail associations will be learned, but no deliveries
+  #   will be tempfailed.  Use a setting of zero with caution, as it
+  #   will learn spammers as well as legitimate senders.
+  #   If it is set to a negative number (like -1), then the mail will
+  #   be tempfailed the first time it is seen, but accepted thereafter.
+*/
+
+int delay_mail_secs = 58 * 60;  /* # 58 Minutes */
+
+/*
+  # Set this to true if you want to try to track locally originated mail
+  #   so that replies are not delayed.  This adds a couple queries to the
+  #   db overhead for each local mail processed, so use with caution.
+  #   Also considers mail sent from whitelisted IPs and authenticated
+  #   senders as local in case we are acting as a smarthost for them. 
+*/
+int reverse_mail_tracking = 1;
+
+/*
+  # This controls the lifetime of the automatic reverse whitelisting of
+  #   senders that we have seen locally originated mail sent to.  Only 
+  #   used if $reverse_mail_tracking is enabled.
+*/
+int reverse_mail_life_secs = 4 * 24 * 3600;  /*  4 Days */
+
+
+/* ========================================================================== */
 void writelog(int level, char *msg, ...) /* Brad provided this */
 {
     va_list ap;
-
+	
 	if( verbose >= level )
 	{
         va_start(ap, msg);
@@ -329,6 +411,100 @@ int do_regex(char *pattern,
 	}
 
 	return 0;
+}
+
+/*
+  # This function is called in all the instances when we want to create a reverse
+  #   whitelist entry for recipients of oubound mail so they will not be delayed
+  #   when they reply.  This is where we do the necessary checks and create
+  #   the record.
+  # If there already exists only one active record of the right type, but where 
+  #   the block has not yet expired, then we update it so the block expires 
+  #   immediately.  This is so internal people can force mail to come through by 
+  #   sending a mail to the sender.  It would be nice if we could update all
+  #   matching rows, but that is too prone to abuse by spammers who may know
+  #   posting patterns from mailing lists and such.
+  # Since we have no way of knowing if another different type of record may allow
+  #   the return mail to pass, sometimes the reverse record we create isn't 
+  #   necessary, but they'll age off fairly quickly.
+  # If any sql calls fail, we either ignore them or simply return, since these 
+  #   updates aren't critical to the mail handling process.
+*/
+
+void reverse_track(char *mail_from, char *rcpt_to)
+{
+	char query[BUFSIZE];
+	MYSQL_RES *result;
+	MYSQL_ROW row1,row2;
+	char row_id[32];
+
+	sprintf(query,"SELECT id FROM relaytofrom WHERE record_expires > NOW() AND mail_from = %s AND rcpt_to = %s",
+			rcpt_to, mail_from);
+	/* note the reversed from and to fields */
+	
+	if( db_query(query, &result) )
+		return;
+	
+	if( !result )
+	{
+		writelog(1,"  reverse_track store_result returned NULL\n");
+		return;
+	}
+
+	row1 = mysql_fetch_row(result);
+	writelog(2,"   fetch_row returns %x\n", row1);
+	
+	if( row1 && row1[0] && strlen(row1[0]) > 0 )
+	{
+		row2 = mysql_fetch_row(result);
+		writelog(2,"   fetch_row returns %x\n", row2);
+		if( !row2 || !row2[0] )
+		{
+			strncpy(row_id, row1[0], sizeof(row_id));
+			
+			/* # There's only one matching row, so if it's auto, and not already unblocked, unblock it. */
+			sprintf(query, "UPDATE relaytofrom SET block_expires = NOW() \
+                             WHERE block_expires > NOW() AND origin_type = 'AUTO' AND id = %s", row_id);
+			
+			writelog(1,"  Reverse tracking row updated to unblock.  rowid: %s\n",row_id);
+		}
+		return;
+	}
+	/* # If got here, then need to create a reverse record */
+	sprintf(query,"INSERT INTO relaytofrom \
+                   (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) \
+                    VALUES (NULL,%s,%s,NOW(),NOW() + INTERVAL %d SECOND,'AUTO',NOW())",
+			rcpt_to, mail_from, reverse_mail_life_secs);
+	/* Note again, the reversed from and to fields!  */
+	if( db_query(query, &result) )
+		return;
+	
+	if( !result )
+	{
+		writelog(1,"  reverse_track store_result returned NULL\n");
+		return;
+	}
+
+	if (verbose) 
+	{
+		/* # Get the rowid for the debugging message */
+		if( db_query("SELECT LAST_INSERT_ID()", &result) )
+			return;
+		if( !result )
+		{
+			writelog(1,"  reverse_track store_result returned NULL\n");
+			return;
+		}
+		
+		row1 = mysql_fetch_row(result);
+		writelog(2,"   fetch_row returns %x\n", row1);
+		
+		if( row1 && row1[0] && strlen(row1[0]) > 0 )
+		{
+			strncpy(row_id, row1[0], sizeof(row_id));
+			writelog(1,"  Reverse tracking row successfully inserted for the recipient (%s) of this mail.  rowid: %s\n", rcpt_to,row_id);
+		}
+	}
 }
 
 sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
@@ -736,7 +912,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	char privdata_copy[BUFSIZE];
 	char *privdata1;
 	char *rowids, *mail_from, *rcpt_to;
-	char *t1, *t2, buf1[BUFSIZE*3];
+	char *t1, *t2, buf1[BUFSIZE*3],*p7;
 	char relay_name_reversed[BUFSIZE];
 	char row_id[32],rowids_buf[BUFSIZE];
 	int res;
@@ -744,12 +920,14 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	MYSQL_ROW row;
 	char buf2[BUFSIZE], *p2, buf3[BUFSIZE];
 	char *tmp, relay_ip[1000], relay_name[1000], relay_ident[1000], relay_maybe_forged[1000];
+	char relay_ip_parts[4][20];
+	char relay_name_parts[40][100], rcpt_domain_parts[40][100];
 	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id, *if_addr;
 	char *rcpt_to2[BUFSIZE], *tstr;
 	char rcpt_domain[BUFSIZE], rcpt_acct[BUFSIZE],*r2;
 	char from_domain[BUFSIZE], from_acct[BUFSIZE];
 	char query2[BUFSIZE];
-	int block_expired = 0;
+	int block_expired = 0,i;
 	regex_t preg;
 	regmatch_t pmatch[10];
 	/* Clear our private data on this context */
@@ -817,6 +995,11 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	relay_name[0] = 0;
 	relay_ident[0] = 0;
 	relay_maybe_forged[0] = 0;
+	for(i=0;i<4;i++)
+		relay_ip_parts[i][0] = 0;
+	for(i=0;i<40;i++)
+		relay_name_parts[i][0] = 0;
+	
 
 	writelog(2,"relay info: %s\n", tmp);
 
@@ -866,7 +1049,68 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	recipient = smfi_getsymval(ctx,"{rcpt_addr}");
 	queue_id = smfi_getsymval(ctx,"{i}");
 	if_addr = smfi_getsymval(ctx,"{if_addr}");
-
+	
+	strcpy(relay_ip_parts[0], relay_ip);
+	strcpy(relay_ip_parts[1], relay_ip);
+	
+	if( (p7=strrchr(relay_ip_parts[1],'.')) )
+	{
+		*p7 = 0;
+		strcpy(relay_ip_parts[2], relay_ip_parts[1]);
+		if( (p7=strrchr(relay_ip_parts[2],'.')) )
+		{
+			*p7 = 0;
+			strcpy(relay_ip_parts[3], relay_ip_parts[2]);
+			if( (p7=strrchr(relay_ip_parts[3],'.')) )
+			{
+				*p7 = 0;
+			}
+		}
+	}
+	
+	if( relay_name && strlen(relay_name ) && !relay_maybe_forged[0] )
+	{
+		char *tstr;
+		int j=0;
+		tstr = relay_name;
+		while( (p7 = strchr(tstr,'.')) )
+		{
+			strcpy(relay_name_parts[j++], tstr);
+			tstr = p7+1;
+		}
+		strcpy(relay_name_parts[j++], tstr);
+	}
+	/* Pull out the domain of the recipient for whitelisting checks */
+	strcpy(buf2,rcpt_to);
+	if( buf2[0] == '<' && buf2[strlen(buf2)-1] == '>' )
+	{
+		strncpy(buf2,rcpt_to+1,strlen(rcpt_to)-2);
+		buf2[strlen(rcpt_to)-2] = 0;
+	}
+	rcpt_acct[0] = 0;
+	p2 = strrchr(buf2,'@');
+	if( p2 )
+	{
+		*p2 = 0;
+		strcpy(rcpt_acct,buf2);
+		strcpy(buf3,p2+1);
+		strcpy(buf2,buf3);
+		
+	}
+	strcpy(rcpt_domain,buf2);
+	if( strlen(rcpt_domain ) )
+	{
+		char *tstr;
+		int j=0;
+		tstr = rcpt_domain;
+		while( (p7 = strchr(tstr,'.')) )
+		{
+			strcpy(rcpt_domain_parts[j++], tstr);
+			tstr = p7+1;
+		}
+		strcpy(rcpt_domain_parts[j++], tstr);
+	}
+	
 	writelog(2,"  From: %s  -  To: %s\n", sender, recipient);
 	writelog(2,"  InMailer: %s  -  OutMailer: %s   -  QueueID: %s\n", mail_mailer, rcpt_mailer, queue_id);
 
@@ -896,12 +1140,159 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	}
 
 	/*
-# Check for local IP relay whitelisting from the sendmail access file
-# FIXME - needs to be implemented
-#
+	  # Check for local IP relay whitelisting from the sendmail access file
+	  #
+	  # We bypass the checks if we are acting as a smart host for this client, or if sendmail will not
+	  #   accept the mail anyway and we want to let sendmail give the sender an immediate failure.
+	  # As strange as it seems, we do not want to bypass the checks if the value is OK or SKIP.
+	  # Only do the access.db checks if the var holding the file name has been defined
+	*/
+	if (sendmail_accessdb_file && strlen(sendmail_accessdb_file)) 
+	{
+		int bypass_checks = 0;
+		char *lhs, *rhs, connectbuf[1000];
+		int ret;
+		
+		/* # First check if this client is a host we should relay for (and therefore also not greylist)
+		   #   We check against both Connect: entries and generic entries without a LHS tag.
+		*/
+		/* lookup relay_ip_parts */
+		for(i=0;i<4;i++)
+		{
+			sprintf(connectbuf,"Connect:%s", relay_ip_parts[i]);
+			key.data = connectbuf;
+			key.size = strlen(key.data);
+			if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+			{
+				if( strncmp(data.data,"RELAY",data.size) == 0 )
+				{
+					bypass_checks =1;
+					break;
+				}
+			}
+			if( !bypass_checks )
+			{
+				
+				key.data = relay_ip_parts[i];
+				key.size = strlen(key.data);
+				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				{
+					if( strncmp(data.data,"RELAY",data.size) == 0 )
+					{
+						bypass_checks =1;
+						break;
+					}
+				}
+			}
+		}
+		for(i=0;!bypass_checks && i<40;i++)
+		{
+			if( relay_name_parts[i][0] == 0 )
+				break;
+			
+			sprintf(connectbuf,"Connect:%s", relay_name_parts[i]);
+			key.data = connectbuf;
+			key.size = strlen(key.data);
+			if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+			{
+				if( strncmp(data.data,"RELAY",data.size) == 0 )
+				{
+					bypass_checks =1;
+					break;
+				}
+			}
+			if( !bypass_checks )
+			{
+				
+				key.data = relay_name_parts[i];
+				key.size = strlen(key.data);
+				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				{
+					if( strncmp(data.data,"RELAY",data.size) == 0 )
+					{
+						bypass_checks =1;
+						break;
+					}
+				}
+			}
+		}
+		if( bypass_checks )
+		{
+			writelog(1,"  Whitelisted Relay match (%s/%s) found in ACCESS DB.  Skipping checks and passing the mail.\n",
+					 relay_ip,relay_name?relay_name:"(nil)");
+		}
+		else
+		{
+			/* # check to see if there is a Spam: FRIEND/HATER entry */
+			if( !bypass_checks )
+			{
+				sprintf(connectbuf,"Spam:%s@%s", rcpt_acct,rcpt_domain);
+				key.data = connectbuf;
+				key.size = strlen(key.data);
+				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				{
+					if( strncmp(data.data,"FRIEND",data.size) == 0 )
+					{
+						bypass_checks =1;
+					}
+				}
+			}
+			if( !bypass_checks )
+			{
+				sprintf(connectbuf,"Spam:%s@", rcpt_acct);
+				key.data = connectbuf;
+				key.size = strlen(key.data);
+				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				{
+					if( strncmp(data.data,"FRIEND",data.size) == 0 )
+					{
+						bypass_checks =1;
+					}
+				}
+			}
+			for(i=0;!bypass_checks && i<40;i++)
+			{
+				if( rcpt_domain_parts[i][0] == 0 )
+					break;
+				
+				sprintf(connectbuf,"Spam:%s", rcpt_domain_parts[i]);
+				key.data = connectbuf;
+				key.size = strlen(key.data);
+				if ((ret = dbp->get(dbp, NULL, &key, &data, 0)) == 0)
+				{
+					if( strncmp(data.data,"FRIEND",data.size) == 0 )
+					{
+						bypass_checks =1;
+						break;
+					}
+				}
+			}
+			if( bypass_checks )
+			{
+				writelog(1,"  Whitelisted Recipient match (%s) found in ACCESS DB.  Skipping checks and passing the mail.\n",
+						 rcpt_to);
+			}
+			
+			
+		}
+		/* 
+		   # We do not bypass the checks based on from addresses, because if they are blocked, they are handled by 
+		   #   sendmail, and if they are RELAY or OK, we would still want to protect the recipients from spam.
+		*/ 
+		if (bypass_checks) 
+		{
+			if( reverse_mail_tracking && strcasecmp(rcpt_mailer,"local"))
+				reverse_track(mail_from, rcpt_to);
+			goto PASS_MAIL;
+		}
+	}
+	
+		
 
-# Check wildcard black or whitelisting based on ip address or subnet
-#   Do the check in such a way that more exact matches are returned first */
+	/* 
+	   # Check wildcard black or whitelisting based on ip address or subnet
+	   #   Do the check in such a way that more exact matches are returned first 
+	*/
 	if( check_wildcard_relay_ip )
 	{
 		char subquery[BUFSIZE];
@@ -954,29 +1345,13 @@ WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (
 			if( atoi(row[2]) )
 			{
 				writelog(1,"  Whitelisted Relay %s[%s]. Skipping checks and passing the mail.\n",relay_name, relay_ip);
+				if( reverse_mail_tracking && strcasecmp(rcpt_mailer,"local"))
+					reverse_track(mail_from, rcpt_to);
 				goto PASS_MAIL;
 			}
 		}
 	}
 
-	/* Pull out the domain of the recipient for whitelisting checks */
-	strcpy(buf2,rcpt_to);
-	if( buf2[0] == '<' && buf2[strlen(buf2)-1] == '>' )
-	{
-		strncpy(buf2,rcpt_to+1,strlen(rcpt_to)-2);
-		buf2[strlen(rcpt_to)-2] = 0;
-	}
-	rcpt_acct[0] = 0;
-	p2 = strrchr(buf2,'@');
-	if( p2 )
-	{
-		*p2 = 0;
-		strcpy(rcpt_acct,buf2);
-		strcpy(buf3,p2+1);
-		strcpy(buf2,buf3);
-		
-	}
-	strcpy(rcpt_domain,buf2);
 	/* See if this recipient (or domain/subdomain) is wildcard white/blacklisted
 	   Do the check in such a way that more exact matches are returned first */
 	if( check_wildcard_rcpt_to )
@@ -1455,17 +1830,49 @@ int main(int argc, char **argv)
 {
 	char conn_str[500];
 	extern FILE relaydelay_in;
-
+	int ret;
+	
 	if( load_config() )
 		return 1;
 
+	if( relaydelay_pid_file)
+	{
+		FILE *PIDF;
+		PIDF = fopen(relaydelay_pid_file,"w");
+		if( !PIDF )
+		{
+			fprintf(stderr,"Unable to open pid file %s\n", relaydelay_pid_file);
+			exit(10);
+		}
+		fprintf(PIDF,"%d\n", getpid());
+		fclose(PIDF);
+	}
+	
+
 	writelog(1,"relaydelay milter version %s\n", VERSION);
 	db_connect();
-	sprintf(conn_str,"inet:%d@%s", 9876, "localhost" );
-
-	if( smfi_setconn(conn_str) == MI_FAILURE )
+	
+	if( sendmail_accessdb_file && strlen(sendmail_accessdb_file) )
 	{
-		fprintf(stderr,"Setting connection to %s was a total failure!\n\n", conn_str);
+		if ((ret = db_create(&dbp, NULL, 0)) != 0) 
+		{ 
+			fprintf(stderr, "db_create: %s\n", db_strerror(ret)); 
+			exit (1); 
+		} 
+        /* the open call below has this many args in 3.3; for later db's it looks like you should insert NULL to be the second arg! */
+		if ((ret = dbp->open(dbp, sendmail_accessdb_file, NULL, DB_HASH, DB_THREAD|DB_RDONLY, 0444)) != 0) 
+		{ 
+			dbp->err(dbp, ret, "%s", sendmail_accessdb_file);
+			
+			exit( 10);
+		}
+		memset(&key, 0, sizeof(key)); 
+		memset(&data, 0, sizeof(data));
+	}
+	
+	if( smfi_setconn(milter_socket_connection) == MI_FAILURE )
+	{
+		fprintf(stderr,"Setting connection to %s was a total failure!\n\n", milter_socket_connection);
 		exit(10);
 	}
 	if( smfi_register(my_callbacks) == MI_FAILURE )
@@ -1474,8 +1881,18 @@ int main(int argc, char **argv)
 		exit(10);
 	}
 
-	smfi_main();
+	if( smfi_main() == MI_FAILURE )
+	{
+		fprintf(stderr,"Main Returns FAILURE. Filter is not running!\n");
+		exit(10);
+	}
 
+	if( dbp )
+	{
+		dbp->close(dbp, 0);
+	}
+	
 	db_disconnect();
 }
+
 

@@ -20,11 +20,17 @@ int lineno = 1;
 \$check_wildcard_relay_ip	{ return KW_CHECK_WILDCARD_RELAY_IP;}
 \$check_wildcard_rcpt_to	{ return KW_CHECK_WILDCARD_RCPT_TO;}
 \$check_wildcard_mail_from	{ return KW_CHECK_WILDCARD_MAIL_FROM;}
+\$maximum_milter_threads	{ return KW_MAXIMUM_MILTER_THREADS;}
 \$tempfail_messages_after_data_phase	{ return KW_TEMPFAIL_MESSAGES_AFTER_DATA_PHASE;}
 \$do_relay_lookup_by_subnet	{ return KW_DO_RELAY_LOOKUP_BY_SUBNET;}
 \$enable_relay_name_updates	{ return KW_ENABLE_RELAY_NAME_UPDATES;}
 \$check_envelope_address_format	{ return KW_CHECK_ENVELOPE_ADDRESS_FORMAT;}
 \$pass_mail_when_db_unavail	{ return KW_PASS_MAIL_WHEN_DB_UNAVAIL;}
+\$milter_socket_connection	{return KW_MILTER_SOCKET_CONNECTION; }
+\$sendmail_accessdb_file	{return KW_SENDMAIL_ACCESSDB_FILE; }
+\$relaydelay_pid_file	{return KW_RELAYDELAY_PID_FILE; }
+\$reverse_mail_tracking	{return KW_REVERSE_MAIL_TRACKING; }
+\$reverse_mail_life_secs	{return KW_REVERSE_MAIL_LIFE_SECS; }
 
 ;	{return SEMI;}
 =	{return EQ;}
