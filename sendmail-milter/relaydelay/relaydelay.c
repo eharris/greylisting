@@ -845,7 +845,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	   A lot of spam is sent with the null sender address <>.  Sendmail reports
 	   that as being from the local mailer, so we have a special case that needs
 	   handling (but only if not also from localhost). */
-	if( strstr(mail_mailer,"smtp") != NULL && strcmp(mail_mailer,"local") != 0)
+	if( strstr(mail_mailer,"smtp") == NULL && strcmp(mail_mailer,"local") != 0)
 	{
 		/* we aren't using an smtp-like mailer, so bypass checks */
 		writelog(1,"  Mail delivery is not using an smtp-like mailer (%s). (from=%s)  Skipping checks.\n",
