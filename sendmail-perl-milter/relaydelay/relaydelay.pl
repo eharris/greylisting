@@ -469,8 +469,8 @@ sub abort_callback
 
   # Get our status and check to see if we need to do anything else
   my $privdata_ref = $ctx->getpriv();
-  # Clear our private data on this context
-  $ctx->setpriv(undef);
+  # Clear our private data on this context (but only if was set previously)
+  $ctx->setpriv(undef) if (defined $privdata_ref);
 
   print "  IN ABORT CALLBACK - PrivData: " . ${$privdata_ref} . "\n" if ($verbose);
 
@@ -589,7 +589,7 @@ sub envrcpt_callback
   #   Not used (since I don't want to depend on it)
   #my $hostname = hostname();
 
-  print strftime("\n=== %Y-%m-%d %H:%M:%S ===\n", localtime($timestamp)) if ($verbose);
+  print strftime('\n=== %Y-%m-%d %H:%M:%S ===\n', localtime($timestamp)) if ($verbose);
 
   # declare our info vars
   my $rowid;
