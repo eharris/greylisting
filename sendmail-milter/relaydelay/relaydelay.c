@@ -527,12 +527,12 @@ sfsistat eom_callback(SMFICTX *ctx)
 	/* Clear our private data on this context */
 	smfi_setpriv(ctx,0);
 
-	writelog(2,"IN EOM CALLBACK - PrivData: %s \n", privdata_ref);
+	writelog(2,"IN EOM CALLBACK - PrivData: %s \n", privdata_ref?privdata_ref:"(nil)");
 
-	strcpy(buf1, privdata_ref);
-
+	buf1[0] = 0;
 	if( privdata_ref )
 	{
+		strcpy(buf1, privdata_ref);
 		free(privdata_ref);
 		privdata_ref = 0;
 	}
