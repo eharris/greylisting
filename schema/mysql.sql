@@ -10,6 +10,11 @@
 ## NOTE: DO NOT just feed this data into mysql unedited! The white/black list 
 ##   stuff needs to edited or you will have problems! Change the name/password 
 ##   for the milter user milter below or suffer the security consequences!
+##
+## NOTE: If you can use Mysql 4.x, you may want to consider using the InnoDB
+##   table type on the table creates.  InnoDB seems to have better performance 
+##   and scales better.  add "TYPE = InnoDB" before the semicolon that ends
+##   each table definition.
 #############################################################################
 
 # Using Mysql 3.23.2 or later (required for NULLs allowed in indexed fields)
@@ -78,12 +83,104 @@ create table relayreport     # Stores settings for each [relay, to, from] triple
 
 create table dns_name        # Stores the reverse dns name lookup for records
 (
-       relay_ip      varchar(18)       NOT NULL,
-       relay_name    varchar(255)      NOT NULL,                       # dns name, stored in reversed character order (for index)
-       last_update   timestamp         NOT NULL,                       # timestamp of last change to this record (automatic)
-       primary key(relay_ip),
-       key(relay_name(20))
+        relay_ip      varchar(18)       NOT NULL,
+        relay_name    varchar(255)      NOT NULL,                       # dns name, stored in reversed character order (for index)
+        last_update   timestamp         NOT NULL,                       # timestamp of last change to this record (automatic)
+        primary key(relay_ip),
+        key(relay_name(20))
 );
+
+create table valid_local_rcpt_to     # Stores a record for the rcpt_to address of every valid local recipient (or wildcard domain)
+(
+        id              int unsigned    NOT NULL        auto_increment, # unique address id
+        rcpt_to_rev     varchar(255)    NOT NULL,                       # email address in reversed char order, no angle brackets
+        record_expires  datetime        NOT NULL,                       # the date after which this record is ignored
+        create_time     datetime        NOT NULL,                       # timestamp of creation time of this record
+        last_update     timestamp       NOT NULL,                       # timestamp of last change to this record (automatic)
+        primary key(id),
+        key(rcpt_to_rev(20))
+);
+
+
+
+# NEW NORMALIZED STRUCTURES
+#create table ip           # Stores a record for every relay we have seen
+#(
+#        id              int unsigned    NOT NULL        auto_increment, # unique domain id
+#        packed          int unsigned    NOT NULL,                       # ip address in packed 4byte form
+#        netmask         int unsigned    NOT NULL,                       # netmask in 4byte form suitable for ANDing with packed
+#        address         varchar(18)     NOT NULL,                       # human readable address in nnn.nnn.nnn.nnn/mm form
+#        domain_id       bigint unsigned,                                # reverse dns domain name (most recently seen)
+#        helo_id
+#        primary key(id),
+#        unique key(name)
+#);
+#
+#create table domain       # Stores a record for every domain and subdomain we know of (used for email addresses and machine names)
+#(
+#        id              bigint unsigned NOT NULL        auto_increment, # unique domain id
+#        name            varchar(160)    NOT NULL,                       # domain name, stored in reversed char order (for index)
+#        primary key(id),
+#        unique key(name)
+#);
+#
+#create table domain       # Stores a record for every domain and subdomain we know of (used for email addresses and machine names)
+#(
+#        id              bigint unsigned NOT NULL        auto_increment, # unique domain id
+#        name            varchar(160)    NOT NULL,                       # domain name, stored in reversed char order (for index)
+#        primary key(id),
+#        unique key(name)
+#);
+#
+#create table email_lhs     # Stores a record for the user part (lhs) of an email address of every recipient or sender
+#(
+#        id              bigint unsigned NOT NULL        auto_increment, # unique username (email lhs) id
+#        name            varchar(120),                                   # user part of email addresses
+#        primary key(id),
+#        unique key(name)
+#);
+#
+#create table email_addr      # Stores a record for the email address of every recipient or sender (or wildcard domains)
+#(
+#        id              bigint unsigned NOT NULL        auto_increment, # unique address id
+#        domain_id       bigint unsigned,                                # domain id of recipient, null if no domain specified
+#        email_lhs_id    bigint unsigned,                                # user part of email addresses (null if whole domain)
+#        primary key(id),
+#        unique key(domain_id, email_lhs_id)
+#);
+#
+#create table local_email     # Stores a record (list) of known valid local addresses (updated by primary for 2ndary MX to use)
+#(
+#        id              int unsigned    NOT NULL        auto_increment, # unique id
+#        email_addr_id   int unsigned    NOT NULL,                       # entry id in emailaddr table of valid local user address
+#        local_id                        NOT NULL,                       # an ipaddr 
+#        record_expires  datetime        NOT NULL,                       # the date after which this record is ignored
+#        create_time     datetime        NOT NULL,                       # timestamp of creation time of this record
+#        primary key(id),
+#        key(emailaddr_id)
+#);
+
+
+
+
+# These tables are for associating email addresses with account management info, and are not used yet
+#create table account
+#(
+#        id              int unsigned    NOT NULL        auto_increment, # unique id
+#        account         varchar(120),                                   # account name/id
+#        password        varchar(80),                                    # password for this account (may be unused)
+#        primary key(id),
+#        unique key(account)
+#);
+
+#create table account_ref
+#(
+#        account_id      int unsigned    NOT NULL,                       # id of account record this email is owned by
+#        localemail_id   int unsigned    NOT NULL,                       # id of local email address record
+#        primary key(account_id,emailaddr_id)
+#);
+
+
 
 # This table is not used yet, possibly never will be
 #create table mail_log        # Stores a record for every mail delivery attempt

@@ -49,6 +49,7 @@
 66.135.209      # Ebay (for time critical alerts)
 66.135.197      # Ebay
 66.218.66       # Yahoo Groups servers (common pool, no retry)
+66.218.69       # Yahoo Groups servers (common pool, no retry)
 152.163.225     # AOL
 194.245.101.88	# Joker.com email forwarding server
 195.238.2.105   # skynet.be (wierd retry pattern)
