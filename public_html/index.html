@@ -63,6 +63,31 @@ that the research and/or software provided here are valuable, and you would like
 our continued development.  To donate, see the <a href="credits.html">Credits page</a>.
 </p>
 
+
+<h3>I received a bounce message about an email I sent, and it directed me to this URL.  What's going on?</h3>
+
+<p>
+Please understand that this site is only giving information about the Greylisting method of blocking
+spam.  Many different pieces of software have implemented some form of the method described here, but this
+site has no affiliation with the server that bounced your mail or with the people who run it.  Some mail servers
+may bounce some email with a message giving this website's address.  This is only so that your mail system 
+administrator can find technical information about the method.  We cannot do anything to stop your email from 
+getting bounced, it is up to you to contact your mail server administator and convince them to configure your 
+mail server to properly handle 45x error codes and delivery retries, which should solve your problem.
+</p>
+
+
+<h3>I run a mailserver, and some users say we are being blocked.  How do I get off your list?</h3>
+
+<p>
+We do not run a blacklist.  There is no centralized list to request checking of your server, or to request removal from.  
+The reason your mailserver is getting blocked is most likely that it does not properly handle 45x SMTP error codes, and does
+not retry delivery within a reasonable amount of time after receiving such a code.  Please read the whitepaper 
+for further technical information.  Please, don't contact us asking for removal.  Since there is nothing to remove you
+from, any requests for removal will be ignored.
+</p>
+
+
 <h3>I run a mailserver, can I use Greylisting?</h3>
 
 <p>
@@ -104,6 +129,7 @@ Non-compliant Mail Servers:<BR>
 <UL>
 <LI>Novell Groupwise 6.0 - <A HREF="http://support.novell.com/cgi-bin/search/searchtid.cgi?/10084802.htm">Confirmation Link</A>
 <LI>InterMail 4.0 - Reported
+<LI>ISMail - Reported
 </UL>
 </p>
 
