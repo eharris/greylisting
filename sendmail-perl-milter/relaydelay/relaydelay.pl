@@ -139,20 +139,89 @@ sub envfrom_callback
   #print "my_envfrom:\n";
   #print "   + args: '" . join(', ', @args) . "'\n";
 
-  # Save the envelope sender string
-  my $mail_from = $args[0];
-  $ctx->setpriv(\$mail_from);
+  # Save the envelope sender string, with a prepended value indicating
+  #   that we can expect an abort without having to handle anything
+  my $privdata = "0:$args[0]";
+  $ctx->setpriv(\$privdata);
 
   return SMFIS_CONTINUE;
 }
 
 
+# The eom callback is called after a message has been successfully passed.
+# It is also the only callback where we can change the headers or body.
+# NOTE: It is only called once for a message, even if that message
+#   had multiple recipients.  We have to handle updating the row for each
+#   recipient here, and it takes a bit of trickery.
+sub eom_callback
+{
+  my $ctx = shift;
+
+  # Get our status and check to see if we need to do anything else
+  my $privdata_ref = $ctx->getpriv();
+  my $status = ${$privdata_ref};
+  # Clear our private data on this context
+  $ctx->setpriv(undef);
+  #print "  IN EOM CALLBACK - PrivData: $status\n";
+
+  # Only if we have useful info in the status string, do we do anything.
+  if ($status =~ /\A([\d,]+):(.*)\Z/) {
+    my $rowids = $1;
+    my $mail_from = $2;  # unused
+
+    if ($rowids > 0) {
+      # split up the rowids and update each in turn
+      my @rowids = split(",", $rowids);
+      foreach my $rowid (@rowids) {
+        DoStatement("UPDATE relaytofrom SET passed_count = passed_count + 1 WHERE id = $rowid");
+        print "  * Mail successfully processed.  Incremented passed count on rowid $rowid.\n";
+      }
+    }
+  }
+  # Add a header to the message (if desired)
+  #if (not $ctx->addheader("X-RelayDelay", "By kinison")) { print "  * Error adding header!\n"; }
+
+  return SMFIS_CONTINUE;
+}
+
+# The abort callback is called even if the message is rejected, even if we
+#   are the one that rejected it.  So we ignore it unless we were passing
+#   the message and need to increment the aborted count to know something
+#   other than this milter caused it to fail.
+# However, there is an additional glitch.  The abort callback may be called
+#   before we have a RCPT TO.  In that case, we also ignore it, since we
+#   haven't yet done anything in the database regarding the message.
+# NOTE: It is only called once for a message, even if that message
+#   had multiple recipients.  We have to handle updating the row for each
+#   recipient here, and it takes a bit of trickery.
 sub abort_callback
 {
   my $ctx = shift;
 
-  # Clear any private data we may have set on this context.
+  # Get our status and check to see if we need to do anything else
+  my $privdata_ref = $ctx->getpriv();
+  #print " ABORT Got Ref\n";
+  #print " ABORT Ref is undef\n" if (! defined($privdata_ref));
+  my $status = ${$privdata_ref};
+  #print " ABORT Deref'd Ref\n";
+  # Clear our private data on this context
   $ctx->setpriv(undef);
+  #print " IN ABORT CALLBACK - PrivData: $status\n";
+
+  # Only if we have useful info in the status string, do we do anything.
+  if (defined $status && $status =~ /\A([\d,]+):(.*)\Z/) {
+    my $rowids = $1;
+    my $mail_from = $2;  # unused
+
+    if ($rowids > 0) {
+      # split up the rowids and update each in turn
+      my @rowids = split(",", $rowids);
+      foreach my $rowid (@rowids) {
+        DoStatement("UPDATE relaytofrom SET aborted_count = aborted_count + 1 WHERE id = $rowid");
+        print "  * Mail was aborted.  Incrementing aborted count on rowid $rowid.\n";
+      }
+    }
+  }
 
   return SMFIS_CONTINUE;
 }
@@ -179,11 +248,20 @@ sub envrcpt_callback
   print "\n";
 
   # Get the stored envelope sender
-  my $context_data_ref = $ctx->getpriv();
-  # And deallocate the context data
-  $ctx->setpriv(undef);
+  my $privdata_ref = $ctx->getpriv();
+  my $status = ${$privdata_ref};
 
-  my $mail_from = ${$context_data_ref};
+  # declare our info vars
+  my $rowid;
+  my $rowids;
+
+  # get our status, and extract the existing rowids and the mail_from address
+  my $mail_from = $status;
+  if (! ($mail_from =~ s/\A([\d,]+):(.*)\Z/$2/)) {
+    print "ERROR: Passed status invalid.  Ignoring this message!\n";
+    GOTO PASS_MAIL;
+  }
+  $rowids = $1;
   my $rcpt_to = $args[0];
 
   print "Stored Sender: $mail_from\n";
@@ -209,9 +287,6 @@ sub envrcpt_callback
   print "  Relay: $tmp\n";
   print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - Forged: $relay_maybe_forged\n";
         
-  # declare our info vars
-  my $rowid;
-
   # Collect the rest of the info for our checks
   my $mail_mailer = $ctx->getsymval("{mail_mailer}");
   my $sender      = $ctx->getsymval("{mail_addr}");
@@ -225,11 +300,11 @@ sub envrcpt_callback
   # Only do our processing if the inbound mailer is an smtp variant.
   #   A lot of spam is sent with the null sender address <>.  Sendmail reports 
   #   that as being from the local mailer, so we have a special case that needs
-  #   handling.
-  if (! ($mail_mailer =~ /smtp\Z/i) && $mail_from ne "<>") {
+  #   handling (but only if not also from localhost).
+  if (! ($mail_mailer =~ /smtp\Z/i) && ($mail_from ne "<>" || $relay_ip eq "127.0.0.1")) {
     # we aren't using an smtp-like mailer, so bypass checks
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n";
-    return SMFIS_CONTINUE;
+    goto PASS_MAIL;
   }
 
   # Check for relay ip blacklisting, followed by whitelisting (by host or net)
@@ -320,12 +395,12 @@ sub envrcpt_callback
     # see if the block expiration of this entry has passed
     if (DoSingleValueQuery("SELECT NOW() > block_expires FROM relaytofrom WHERE id = $rowid")) {
       # has expired, so pass the mail
-      print "  Email is known and block has expired.  Passing the mail.\n";
+      print "  Email is known and block has expired.  Passing the mail.  rowid: $rowid\n";
       goto PASS_MAIL;
     }
     else {
       # the email is known, but the block has not expired.  So return a tempfail.
-      print "  Email is known but block has not expired.  Issuing a tempfail.\n";
+      print "  Email is known but block has not expired.  Issuing a tempfail.  rowid: $rowid\n";
       goto DELAY_MAIL;
     }
   }
@@ -362,9 +437,16 @@ sub envrcpt_callback
   # Increment the blocked count (if rowid is defined)
   DoStatement("UPDATE relaytofrom SET blocked_count = blocked_count + 1 WHERE id = $rowid") if (defined $rowid);
   # FIXME - And do mail logging
+  
+  # Save our privdata for the next callback (don't add this rowid, since have already handled it)
+  my $privdata = "$rowids:$rcpt_to";
+  $ctx->setpriv(\$privdata);
 
-  # Set the reply code to a unique message (for debugging)
+  # Set the reply code to a unique message (for debugging) - this dsn is what is normally the default
   $ctx->setreply("451", "4.7.1", "Please try again later (TEMPFAIL)");
+  # Instead, we use a better code, 450 and 4.3.2 per RFC 821 and 1893, saying the system isn't currently accepting network messages
+  # Disabled again.  This causes aol to retry deliveries over and over with no delay.
+  #$ctx->setreply("450", "4.3.2", "Please try again later (TEMPFAIL)");
   # Issue a temporary failure for this message.  Connection may or may not continue.
   return SMFIS_TEMPFAIL;
 
@@ -373,12 +455,13 @@ sub envrcpt_callback
   # Do database bookkeeping (if rowid is defined)
   if (defined $rowid) {
     # Increment the passed count
-    DoStatement("UPDATE relaytofrom SET passed_count = passed_count + 1 WHERE id = $rowid");
+    #DoStatement("UPDATE relaytofrom SET passed_count = passed_count + 1 WHERE id = $rowid");
 
-    # A special update to end the life of this record, if the sender is the null sender
-    #   (Spammers send from this a lot, and it should only be used for bounces.  This
-    #   Makes sure that only one (or a couple, small race) of these gets by per delay.
+    # Only update the lifetime of records if they are AUTO
     if (DoSingleValueQuery("SELECT origin_type = 'AUTO' FROM relaytofrom WHERE id = $rowid")) {
+      # A special update to end the life of this record, if the sender is the null sender
+      #   (Spammers send from this a lot, and it should only be used for bounces.  This
+      #   Makes sure that only one (or a couple, small race) of these gets by per delay.
       if ($mail_from eq "<>") {
         #print "  Mail is from NULL sender.  Updating it to end its life.\n";
         DoStatement("UPDATE relaytofrom SET record_expires = NOW() WHERE id = $rowid");
@@ -388,7 +471,27 @@ sub envrcpt_callback
         DoStatement("UPDATE relaytofrom SET record_expires = NOW() + INTERVAL $update_record_life_secs SECOND WHERE id = $rowid");
       }
     }
+
+
+    # If we have a rowid, then set the context data to indicate we 
+    #   successfully handled this message as a pass, and that we 
+    #   don't expect an abort without needing further processing.  
+    #   We have to keep the rcpt_to on there, since this callback
+    #   may be called several times for a specific message if it 
+    #   has multiple recipients, and we need it for logging.
+    # The format of the privdata is one or more rowids seperated by
+    #   commas, followed by a colon and the envelope from.
+    if ($rowids > 0) {
+      $rowids .= ",$rowid";
+    }
+    else {
+      $rowids = $rowid;
+    }
   }
+  # Save our privdata for the next callback
+  my $privdata = "$rowids:$rcpt_to";
+  $ctx->setpriv(\$privdata);
+
   # FIXME - And do mail logging
  
   # And indicate the message should be passed.
@@ -430,7 +533,7 @@ my %my_callbacks =
 #	'header' =>	\&header_callback,
 #	'eoh' =>	\&eoh_callback,
 #	'body' =>	\&body_callback,
-#	'eom' =>	\&eom_callback,
+	'eom' =>	\&eom_callback,
 	'abort' =>	\&abort_callback,
 #	'close' =>	\&close_callback,
 );
