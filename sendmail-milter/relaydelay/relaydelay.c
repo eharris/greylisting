@@ -462,6 +462,8 @@ sfsistat eom_callback(SMFICTX *ctx)
 		    #   I added the (TEMPFAIL) so it is easy to tell in the syslogs if the failure was due to
 		    #     the processing of the milter, or if it was due to other causes within sendmail
 		    #     or from the milter being inaccessible/timing out. */
+			if( verbose )
+				printf("EOM: Rowids=%s mail_from=%s\n", rowids, mail_from);
 			smfi_setreply(ctx, "451", "4.7.1", "Please try again later (TEMPFAIL)") ;
 			return SMFIS_TEMPFAIL;
 
@@ -487,7 +489,8 @@ sfsistat eom_callback(SMFICTX *ctx)
 				}
 				else
 				{
-					if( verbose )printf("ERROR: Database Call Failed: %s", mysql_error(&global_dbh));
+					if( verbose )printf("ERROR: Database Call Failed: %s\n", mysql_error(&global_dbh));
+					if( verbose )printf("Query= %s\n", commandbuf);
 					db_disconnect();
 					if( pass_mail_when_db_unavail )
 						return SMFIS_CONTINUE;
@@ -639,7 +642,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	char *rowids,*mail_from,*rcpt_to;
 	char *t1,*t2,buf1[BUFSIZE*3];
 	char relay_name_reversed[BUFSIZE];
-	char row_id[32];
+	char row_id[32],rowids_buf[BUFSIZE];
 	int res;
 	MYSQL_RES *result;
 	/* Clear our private data on this context */
@@ -667,7 +670,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		{
 			*t1 = 0;
 			*t2 = 0;
-			rowids = buf1;
+			strcpy(rowids_buf, buf1);
+			rowids = rowids_buf;
 			mail_from = t1+1;
 		}
 	}
@@ -1171,10 +1175,15 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		   recipients, and we need it for logging.
 		 The format of the privdata1 is one or more rowids seperated by commas, followed by 
 		   a null, and the envelope from. */
-		if( strlen(rowids) > 0 )
+		if( strlen(rowids) > 0 && atoi(rowids) > 0)
+		{
+			strcat(rowids,",");
 			strcat(rowids,row_id);
+		}
 		else
+		{
 			strcpy(rowids,row_id);
+		}
 	}
 	
 	/* Save our privdata1 for the next callback */
