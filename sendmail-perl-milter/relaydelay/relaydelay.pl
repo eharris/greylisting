@@ -58,8 +58,8 @@ my $config_file = "/etc/mail/relaydelay.conf";
 #   then set this appropriately.
 my $verbose = 1;
 
-# To run as a daemon rather than a standalone script, set this
-# Default is to run standalone.
+# To run as a daemon rather than a standalone script, set this.
+# The default is to run standalone.
 my $run_as_daemon = 0;
 
 # This specifies where status messages are printed.  If set to an empty
