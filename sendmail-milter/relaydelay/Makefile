@@ -3,8 +3,19 @@ VERSION = 0.4
 unam = $(strip ${shell /bin/uname})
 
 ifeq ($(unam),SunOS)
+os = $(strip ${shell /bin/uname -r})
+
+ifeq ($(os),5.5.1)
+LIBS=-L/usr/local/mysql/lib/mysql  -lmilter -lsm -lmysqlclient_r  -lpthread -lm -lz -lresolv -lsocket -lnsl
+INCL=-I/usr/local/mysql/include/mysql
+
+else
 LIBS=-L/usr/local/lib/mysql  -lmilter -lmysqlclient_r  -lpthread -lm -lz -lresolv -lsocket -lnsl
 INCL=-I/usr/local/include/mysql
+
+endif
+
+
 endif
 
 ifeq ($(unam),Linux)
