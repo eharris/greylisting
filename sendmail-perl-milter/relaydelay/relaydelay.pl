@@ -77,6 +77,12 @@ my $database_port = 3306;
 my $database_user = 'db_user';
 my $database_pass = 'db_pass';
 
+# Set this if you want to check for stale db connections at the entry to
+#   every callback that accesses the db.  If your db is not close to you 
+#   network-wise, this may add a fair amount of latency.  If your database 
+#   is reliable, it's probably not necessary.  Disabled by default.
+my $check_stale_db_handles = 0;
+
 # Set this to indicate the milter "name" that this milter will be 
 #   identified by.  This must match the first parameter from the 
 #   INPUT_MAIL_FILTER definition in the sendmail.mc configuration.
@@ -259,11 +265,12 @@ sub db_connect($) {
   my $verbose = shift;
 
   if (defined($global_dbh)) {
-    return $global_dbh;
-    # This helps detect db connection problems faster, but it causes a lot of
-    # unneccessary traffic/latency if the db is not on the local server.  
-    # I don't think it's worth it, but it's left here if its desired.
-    #return $global_dbh if ($global_dbh->ping());
+    if ($check_stale_db_handles) {
+      return $global_dbh if ($global_dbh->ping());
+    } 
+    else {
+      return $global_dbh;
+    }
   }
 
   my $dsn = "DBI:$database_type:database=$database_name:host=$database_host:port=$database_port";
