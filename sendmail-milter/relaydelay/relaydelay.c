@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <libmilter/mfapi.h>
 #include <regex.h>
-
+#include <pthread.h>
 
 #include "mysql.h"
 
@@ -17,6 +17,10 @@ char *database_host = "localhost";
 int  database_port = 3306;
 char *database_user = "milter";
 char *database_pass = "password";
+
+#define BUFSIZE 4096
+#define SAFESIZ 4095
+
 
 /*
 # This determines how many seconds we will block inbound mail that is
@@ -161,6 +165,28 @@ void db_disconnect(void)
 	mysql_connected = 0;
 }
 
+int db_query(char *commandbuf, MYSQL_RES **result)
+{
+	pthread_mutex_t mut;
+	int res;
+	
+	if( verbose > 1 ) printf("   About to issue query: %s\n", commandbuf);
+	pthread_mutex_init(&mut, 0);
+	
+	pthread_mutex_lock(&mut);
+	
+	if( (res = mysql_query(&global_dbh, commandbuf)) == 0 )
+	{
+		(*result) = mysql_store_result(&global_dbh);
+	}
+	
+	pthread_mutex_unlock(&mut);
+	
+	pthread_mutex_destroy(&mut);
+	return res;
+}
+
+
 /*
 
 #############################################################################
@@ -213,8 +239,8 @@ int do_regex(char *pattern, char *string, regex_t *preg, regmatch_t pmatch[10],i
 sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 {
 	char *mail_from = argv[0];
-	char mail_from_buf[4096];
-	char *privdata,buf[4096];
+	char mail_from_buf[BUFSIZE];
+	char *privdata,buf[BUFSIZE];
 	
 	if(verbose>1) printf("envfrom Callback:\n");
 
@@ -226,10 +252,13 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 	{
 		char *mail_mailer = smfi_getsymval(ctx,"{mail_mailer}");
 		if(verbose > 1) printf("   mail_mailer: %s\n", mail_mailer);
-		strcpy(mail_from_buf, mail_from);
+		strncpy(mail_from_buf, mail_from,SAFESIZ);
+		mail_from_buf[SAFESIZ] = 0;
+
 		if( !strstr(mail_mailer,"smtp") )
 		{
-		      /* # we aren't using an smtp-like mailer, so bypass checks */
+		      /* # we aren't using an smtp-like mailer, so bypass checks SMM: I see stuff like "local" from 
+			       MS Outlook, etc */
 
 		}
 		else
@@ -242,7 +271,7 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 		      #   had to guess by what "looked" normal, or possible. */
 			regex_t preg;
 			regmatch_t pmatch[10];
-			char mail_from_buf2[4096],*at,*p1;
+			char mail_from_buf2[BUFSIZE],*at,*p1;
 			int errcode;
 			if(verbose>1) printf("   mail_from: %s\n", mail_from);
 			if( do_regex(  "^<(.*)>$", mail_from, &preg, pmatch, 0 ) == 0 )
@@ -280,7 +309,9 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 			if( strlen(mail_from) > 0 )
 			{
 				char *from_acct, *from_domain;
-				strcpy(mail_from_buf2,mail_from);
+				strncpy(mail_from_buf2,mail_from,SAFESIZ);
+				mail_from_buf2[SAFESIZ] = 0;
+				
 				at = strchr(mail_from_buf2,'@');
 				if( at )
 				{
@@ -345,9 +376,12 @@ int split(char sep, char *str, char ***array)
 {
 	int cnt=0,cnt2=1;
 	char **arr;
-	char *p=str,*p1=str,*buf2;
-	buf2 = (char *)malloc(strlen(str)+1);
+	char *p=str,*p1=str;
+	char *buf2;
+	
+	buf2=(char*) malloc(strlen(str)+1);
 	strcpy(buf2,str);
+	
 	while( (p1=strchr(p,sep)) )
 	{
 		p = p1+1;
@@ -364,6 +398,14 @@ int split(char sep, char *str, char ***array)
 	}
 	*array = arr;
 	return cnt;
+}
+
+void free_split(char **arr, int cnt)
+{
+	int i;
+	
+	free(arr[0]);
+	free(arr);
 }
 
 
@@ -387,6 +429,13 @@ sfsistat eom_callback(SMFICTX *ctx)
 		db_connect();
 
 	strcpy(buf1,privdata_ref);
+	
+	if( privdata_ref )
+	{
+		free(privdata_ref);
+		privdata_ref = 0;
+	}
+	
 	t1 = strchr(buf1,'\t');
 	if( t1 )
 	{
@@ -431,12 +480,10 @@ sfsistat eom_callback(SMFICTX *ctx)
 					continue;
 
 				sprintf(commandbuf,"UPDATE relaytofrom SET passed_count = passed_count + 1 WHERE id = %s", arr[i] );
-				if( verbose > 1 ) printf("About to issue query: %s\n", commandbuf);
-				if( (res = mysql_query(&global_dbh, commandbuf)) == 0 )
+				if( (res = db_query(commandbuf,&result)) == 0 )
 				{
-					result = mysql_store_result(&global_dbh);
 					if( verbose )
-					printf("  * Mail successfully processed.  Incremented passed count on rowid %s.\n", arr[i]);
+						printf("  * Mail successfully processed.  Incremented passed count on rowid %s.\n", arr[i]);
 				}
 				else
 				{
@@ -453,8 +500,7 @@ sfsistat eom_callback(SMFICTX *ctx)
 				        #   the delivery is completely successful (not spam blocked or nonexistant user, or 
 				        #   other failure out of our control) */
 					sprintf(commandbuf,"UPDATE relaytofrom SET record_expires = NOW() + INTERVAL %d SECOND  WHERE id = %s AND origin_type = 'AUTO'", update_record_life_secs, arr[i]);
-					if( verbose > 1 ) printf("  About to issue query: %s\n", commandbuf);
-					if( mysql_query(&global_dbh, commandbuf) != 0 )
+					if( db_query(commandbuf,&result) != 0 )
 					{
 						if(verbose) printf("ERROR: Database Call Failed: %s", mysql_error(&global_dbh));
 						fflush(stdout);
@@ -463,12 +509,9 @@ sfsistat eom_callback(SMFICTX *ctx)
 							return SMFIS_CONTINUE;
 						return SMFIS_TEMPFAIL;
 					}
-					else
-					{
-						result = mysql_store_result(&global_dbh);
-					}
 				}
 			}
+			free_split(arr,cnt);
 		}
 		/* here would be a good place to add the ol' header */
 
@@ -509,6 +552,11 @@ sfsistat abort_callback(SMFICTX *ctx)
 		db_connect();
 
 	strcpy(buf1,privdata_ref);
+	if( privdata_ref )
+	{
+		free(privdata_ref);
+		privdata_ref = 0;
+	}
 	t1 = strchr(buf1,'\t');
 	if( t1 )
 	{
@@ -532,11 +580,12 @@ sfsistat abort_callback(SMFICTX *ctx)
 			for(i=0; i<cnt; i++ )
 			{
 				char commandbuf[8000];
+				MYSQL_RES *result;
 				int res;
 				if( !strcmp(arr[i],"0") ) /* SMM == skip a zero row id! */
 					continue;
 				sprintf(commandbuf,"UPDATE relaytofrom SET aborted_count = aborted_count + 1 WHERE id = %s", arr[i] );
-				if( (res = mysql_query(&global_dbh, commandbuf)) == 0 )
+				if( (res = db_query(commandbuf,&result)) == 0 )
 				{
 					if( verbose )
 					printf("  * Mail was aborted.  Incremented aborted count on rowid %s.\n", arr[i]);
@@ -555,15 +604,15 @@ sfsistat abort_callback(SMFICTX *ctx)
 				   #   IS AN AUTO RECORD.
 				   # If we find that it is such a record, update the expire time to now */
 				sprintf(commandbuf,"UPDATE relaytofrom SET record_expires = NOW() WHERE id = %s AND origin_type = 'AUTO' AND passed_count = 0", arr[i] );
-				if( (res = mysql_query(&global_dbh, commandbuf)) == 0 )
+				if( (res = db_query(commandbuf,&result)) == 0 )
 				{
 					if( mysql_affected_rows(&global_dbh) && verbose )
-					printf("  * Mail  record had no successful deliveries.  Expired record on rowid %s.\n", arr[i]);
+						printf("  * Mail  record had no successful deliveries.  Expired record on rowid %s.\n", arr[i]);
 				}
 				else
 				{
 					if( verbose )
-					printf("ERROR: Database Call Failed: %s", mysql_error(&global_dbh));
+						printf("ERROR: Database Call Failed: %s", mysql_error(&global_dbh));
 					db_disconnect();
 					if( pass_mail_when_db_unavail )
 						return SMFIS_CONTINUE;
@@ -585,20 +634,31 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 {
 	/* Get our status and check to see if we need to do anything else */
 	char *privdata_ref = smfi_getpriv(ctx);
-	char privdata1[4096];
+	char privdata_copy[BUFSIZE];
+	char *privdata1;
 	char *rowids,*mail_from,*rcpt_to;
-	char *t1,*t2,buf1[99000];
-	char relay_name_reversed[4096];
+	char *t1,*t2,buf1[BUFSIZE*3];
+	char relay_name_reversed[BUFSIZE];
 	char row_id[32];
 	int res;
 	MYSQL_RES *result;
 	/* Clear our private data on this context */
 	
 	if( verbose>1 )
-		printf("Envrcpt callback:\n");
+		printf("Envrcpt callback:   privdata=%s\n",privdata_ref);
 	row_id[0] = 0;	
 	rcpt_to = argv[0];
 	strcpy(buf1,privdata_ref);
+	
+	strncpy(privdata_copy,privdata_ref,SAFESIZ);
+	privdata_copy[SAFESIZ] = 0;
+	
+	if( privdata_ref )
+	{
+		free(privdata_ref);
+		privdata_ref = 0;
+	}
+	
 	t1 = strchr(buf1,'\t');
 	if( t1 )
 	{
@@ -613,12 +673,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	}
 	if( t1 && t2 )
 	{
-		char buf2[4096],*p2,buf3[4096];
+		char buf2[BUFSIZE],*p2,buf3[BUFSIZE];
 		char *tmp,relay_ip[1000],relay_name[1000],relay_ident[1000],relay_maybe_forged[1000];
 		char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id;
-		char *rcpt_to2[4096],*tstr;
-		char rcpt_domain[4096],*r2;
-		char query2[4096];
+		char *rcpt_to2[BUFSIZE],*tstr;
+		char rcpt_domain[BUFSIZE],*r2;
+		char query2[BUFSIZE];
 		int block_expired = 0;
 		regex_t preg;
 		regmatch_t pmatch[10];
@@ -702,11 +762,10 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		  #   Do the check in such a way that more exact matches are returned first */
 		if( check_wildcard_relay_ip )
 		{
-			char subquery[4096];
-			char query[4096];
+			char subquery[BUFSIZE];
+			char query[BUFSIZE];
 			int blacklisted, whitelisted;
 			int i,res;
-			MYSQL_RES *result;
 			int num_rows, num_fields;
 
 			strcpy(buf2,relay_ip);
@@ -723,18 +782,15 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 					*p2 = 0;
 			}
 			sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (%s) ORDER BY length(relay_ip) DESC", subquery);
-			if( verbose>1 ) printf("   About to make Query: %s\n", query);
-			if( (res = mysql_query(&global_dbh, query)) == 0 )
+			if( (res = db_query(query,&result)) == 0 )
 			{
-			if( verbose >1) printf("   About to store result\n");
-				result = mysql_store_result(&global_dbh);
 				if( result )
 				{
 					MYSQL_ROW row;
 					int num_fields = mysql_num_fields(result);
-			if( verbose>1 ) printf("   store_result succeeded == num_fields is %d\n", num_fields);
+					if( verbose>1 ) printf("   store_result succeeded == num_fields is %d\n", num_fields);
 					row = mysql_fetch_row(result);
-			if( verbose>1 ) printf("   fetch_row returns %x\n", row);
+					if( verbose>1 ) printf("   fetch_row returns %x\n", row);
 				
 					if( row )
 					{
@@ -797,9 +853,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		   Do the check in such a way that more exact matches are returned first */
 		if( check_wildcard_rcpt_to )
 		{
-			char buf2[4096],*p2,buf3[4096];
-			char subquery[4096];
-			char query[4096];
+			char buf2[BUFSIZE],*p2,buf3[BUFSIZE];
+			char subquery[BUFSIZE];
+			char query[BUFSIZE];
 			int i,res,blacklisted,whitelisted;
 			int num_rows, num_fields;
 			if( verbose>1 ) printf("   rcpt_domain=%s, rcpt_to=%s \n", rcpt_domain, rcpt_to);
@@ -820,10 +876,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				}
 			}
 			sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND (%s) ORDER BY length(rcpt_to) DESC", subquery);
-			if( verbose>1 ) printf("   About to make Query: %s\n", query);
-			if( (res = mysql_query(&global_dbh, query)) == 0 )
+			if( (res = db_query(query,&result)) == 0 )
 			{
-				result = mysql_store_result(&global_dbh);
 				if( result )
 				{
 					MYSQL_ROW row;
@@ -880,10 +934,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		{
 			/* SMM-- don't understand quite the reversed relayname....
 			   if this isn't strictly necc., then I'll skip it for now! */
-			char rev[4096];
-			char forw[4096],*p3;
-			char query[4096];
-			MYSQL_RES *result;
+			char rev[BUFSIZE];
+			char forw[BUFSIZE],*p3;
+			char query[BUFSIZE];
 			strcpy(forw,relay_name);
 			rev[0] = 0;
 			while ((p3 = strrchr(forw,'.')))
@@ -899,10 +952,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			if( verbose>1 ) printf("   Reversed IP: %s\n", rev);
 			sprintf(query,"INSERT IGNORE INTO dns_name (relay_ip,relay_name) VALUES ('%s','%s')",
 				relay_ip, rev);
-			if( verbose>1 ) printf("   About to make Query: %s\n", query);
-			if( (res = mysql_query(&global_dbh, query)) == 0 )
+			if( (res = db_query(query,&result)) == 0 )
 			{
-				result = mysql_store_result(&global_dbh);
 				if( result )
 				{
 					int num_rows = mysql_num_rows(result);
@@ -929,7 +980,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		sprintf(query2,"SELECT id, NOW() > block_expires FROM relaytofrom WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'", mail_from, rcpt_to);
 		if( do_relay_lookup_by_subnet )
 		{
-			char buf3[4096],*p3;
+			char buf3[BUFSIZE],*p3;
 			strcpy(buf3,relay_ip);
 			p3 = strrchr(buf3,'.');
 			if( p3 )
@@ -946,10 +997,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			strcat(query2,"'");
 			
 		}
-		if( verbose>1 ) printf("   About to make Query: %s\n", query2);
-		if( (res = mysql_query(&global_dbh, query2)) == 0 )
+		if( (res = db_query(query2,&result)) == 0 )
 		{
-			result = mysql_store_result(&global_dbh);
 			if( result )
 			{
 				MYSQL_ROW row;
@@ -1000,8 +1049,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			   on the triplet fields (the key would be too large), it's either this or normalizing the data to have seperate 
 			   tables for each triplet field.  While that would be a good optimization, it would make this too complex for 
 			   an example implementation. */
-			if( verbose>1 ) printf("   About to make Query: %s\n", "LOCK TABLE relaytofrom WRITE");
-			res= mysql_query(&global_dbh, "LOCK TABLE relaytofrom WRITE");
+			res= db_query("LOCK TABLE relaytofrom WRITE",&result);
 			if( res )
 				goto DB_FAILURE;
 			/* I am skipping the Re-read and unlock table, and DELAY_MAIL return, 
@@ -1010,16 +1058,13 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			
 		
 			sprintf(query2,"INSERT INTO relaytofrom (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) VALUES ('%s','%s','%s',NOW() + INTERVAL %d SECOND,NOW() + INTERVAL %d SECOND,  'AUTO', NOW())", relay_ip, mail_from, rcpt_to, delay_mail_secs, auto_record_life_secs);
-			if( verbose>1 ) printf("   About to make Query: %s\n", query2);
-			res= mysql_query(&global_dbh, query2);
+			res= db_query(query2,&result);
 			if( res )
 				goto DB_FAILURE;
 		
-			if( verbose>1 ) printf("   About to make Query: %s\n", "SELECT LAST_INSERT_ID()");
-			res = mysql_query(&global_dbh, "SELECT LAST_INSERT_ID()");
+			res = db_query("SELECT LAST_INSERT_ID()",&result);
 			if( res )
 				goto DB_FAILURE;
-			result = mysql_store_result(&global_dbh);
 			if( result )
 			{
 				MYSQL_ROW row;
@@ -1035,8 +1080,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				row_id[0] = 0;
 				}
 			}
-			if( verbose>1 ) printf("   About to make Query: %s\n", "UNLOCK TABLE");
-			res = mysql_query(&global_dbh, "UNLOCK TABLE");
+			res = db_query("UNLOCK TABLE",&result);
 			if( res )
 				goto DB_FAILURE;
 		
@@ -1051,11 +1095,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	DELAY_MAIL:
 	if( row_id[0] && atoi(row_id) )
 	{
-		char query[4096];
+		char query[BUFSIZE];
 		sprintf(query,"UPDATE relaytofrom SET blocked_count = blocked_count + 1 WHERE id = %s",row_id);
-		if(verbose>1)
-			printf("  About to query: %s\n", query);
-		res= mysql_query(&global_dbh, query);
+		res= db_query(query,&result);
 		if( res )
 			goto DB_FAILURE;
 	}
@@ -1067,17 +1109,24 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 	if( !strcmp(mail_from,"<>") || tempfail_messages_after_data_phase )
 	{
-		char privdata1[4096];
+		char *privdata2;
+		
 		if( verbose > 1)
 			printf("  Delaying tempfail reject until eom phase.\n");
 		/* save that this message needs to be blocked later in the transaction (after eom) */
-		sprintf(privdata1,"00\t%s\t%s", mail_from, rcpt_to);
-		smfi_setpriv(ctx,privdata1);
+		privdata2 = (char *)malloc(strlen(mail_from)+strlen(rcpt_to)+6);
+		sprintf(privdata2,"00\t%s\t%s", mail_from, rcpt_to);
+		smfi_setpriv(ctx,privdata2);
 		/* and let the message continue processing, since will be blocked at eom if it isn't aborted before that */
 		return SMFIS_CONTINUE;
 	}
 	/* Save our privdata1 for the next callback (don't add this rowid, since have already handled it) */
-	smfi_setpriv(ctx,privdata_ref);
+	privdata_ref = (char*)malloc(strlen(privdata_copy)+1);
+	strcpy(privdata_ref,privdata_copy);
+	smfi_setpriv(ctx,privdata1);
+	privdata_copy[0] = 0;
+	privdata_ref = 0;
+
 	/* Set the reply code to a unique message (for debugging) - this dsn is what is normally the default */
 	smfi_setreply(ctx, "450", "4.3.2", "Please try again later (TEMPFAIL)");
 
@@ -1086,7 +1135,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 	BOUNCE_MAIL:
 	/* set privdata1 so later callbacks won't have problems */
-	smfi_setpriv(ctx,"0");
+	privdata_ref = (char*)malloc(3);
+	strcpy(privdata_ref,"0");
+	
+	smfi_setpriv(ctx,privdata_ref);
+	privdata_ref = 0;
+	
 	/* Indicate the message should be aborted (want a custom error code?) */
 	return SMFIS_REJECT;
 
@@ -1103,13 +1157,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		if( !strcmp(mail_from,"<>" ) )
 		{
 			/* Only update the lifetime of records if they are AUTO, wouldn't want to do wildcard records  */
-			char querystr[4096];
+			char querystr[BUFSIZE];
 			sprintf(querystr,"UPDATE relaytofrom SET record_expires = NOW() WHERE id = %s AND origin_type = 'AUTO'", row_id);
-			if(mysql_query(&global_dbh, querystr))
+			if(db_query(querystr,&result))
 			{
 				goto DB_FAILURE;
 			}
-			result = mysql_store_result(&global_dbh);
 		}
 		/*Since we have a rowid, then set the context data to indicate we successfully 
 		   handled this message as a pass, and that we don't expect an abort without 
@@ -1125,9 +1178,13 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	}
 	
 	/* Save our privdata1 for the next callback */
+	privdata1 = (char*)malloc(strlen(rowids)+strlen(mail_from)+strlen(rcpt_to)+4);
 	sprintf(privdata1,"%s\t%s\t%s", rowids, mail_from, rcpt_to);
+	
 	smfi_setpriv(ctx,privdata1);
 
+	privdata1 = 0;
+	
 	/* FIXME - Should do mail logging? */
 	
 	/* And indicate the message should continue processing. */
@@ -1138,8 +1195,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 	printf("ERROR: Database Call Failed: %s", mysql_error(&global_dbh));
 	db_disconnect();
-	sprintf(privdata1,"0	%s	", mail_from);
+	privdata1 = (char *)malloc(strlen(mail_from)+5);
+	sprintf(privdata1,"0\t%s\t", mail_from);
+
 	smfi_setpriv(ctx,privdata1);
+	privdata1 = 0;
+	
 	if( pass_mail_when_db_unavail )
 		return SMFIS_CONTINUE;
 	return SMFIS_TEMPFAIL;
