@@ -725,11 +725,11 @@ sub envrcpt_callback
 
     if (defined $rowid) {
       if ($blacklisted) {
-        print "  Blacklisted Relay.  Skipping checks and rejecting the mail.\n" if ($verbose);
+        print "  Blacklisted Relay.  Skipping checks and rejecting the mail.  rowid: $rowid\n" if ($verbose);
         goto DELAY_MAIL;
       }
       if ($whitelisted) {
-        print "  Whitelisted Relay.  Skipping checks and passing the mail.\n" if ($verbose);
+        print "  Whitelisted Relay.  Skipping checks and passing the mail.  rowid: $rowid\n" if ($verbose);
         reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
         goto PASS_MAIL;
       }
@@ -761,13 +761,49 @@ sub envrcpt_callback
 
     if (defined $rowid) {
       if ($blacklisted) {
-        print "  Blacklisted Recipient.  Skipping checks and rejecting the mail.\n" if ($verbose);
+        print "  Blacklisted Recipient.  Skipping checks and rejecting the mail.  rowid: $rowid\n" if ($verbose);
         goto DELAY_MAIL;
       }
       if ($whitelisted) {
-        print "  Whitelisted Recipient.  Skipping checks and passing the mail.\n" if ($verbose);
+        print "  Whitelisted Recipient.  Skipping checks and passing the mail.  rowid: $rowid\n" if ($verbose);
         goto PASS_MAIL;
       }
+    }
+  }
+
+
+  # See if this sender (or domain/subdomain) is wildcard blacklisted
+  # We don't check for whitelisted, since that is too prone to abuse
+  #   Do the check in such a way that more exact matches are returned first
+  if ($check_wildcard_rcpt_to) {
+    my $subquery;
+    foreach my $key ("<$from_username\@$from_domain>", "$from_username\@$from_domain", "$from_username\@", @from_domain_parts)
+    {
+      $subquery .= " OR " if (defined $subquery);
+      $subquery .= "mail_from = " . $dbh->quote($key);
+    }
+    my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
+      .         "  WHERE record_expires > NOW() "
+      .         "    AND relay_ip  IS NULL "
+      .         "    AND rcpt_to IS NULL "
+      .         "    AND ($subquery) "
+      .         "  ORDER BY length(mail_from) DESC";
+
+    my $sth = $dbh->prepare($query) or goto DB_FAILURE;
+    $sth->execute() or goto DB_FAILURE;
+    ($rowid, my $blacklisted, my $whitelisted) = $sth->fetchrow_array();
+    goto DB_FAILURE if ($sth->err);
+    $sth->finish();
+
+    if (defined $rowid) {
+      if ($blacklisted) {
+        print "  Blacklisted Sender.  Skipping checks and rejecting the mail.  rowid: $rowid\n" if ($verbose);
+        goto DELAY_MAIL;
+      }
+      #if ($whitelisted) {
+      #  print "  Whitelisted Sender.  Skipping checks and passing the mail.  rowid: $rowid\n" if ($verbose);
+      #  goto PASS_MAIL;
+      #}
     }
   }
 
@@ -959,6 +995,7 @@ sub envrcpt_callback
   # Increment the blocked count (if rowid is defined)
   if (defined $rowid) {
     $dbh->do("UPDATE relaytofrom SET blocked_count = blocked_count + 1 WHERE id = $rowid") or goto DB_FAILURE;
+    print "  * Mail blocked with temporary error.  Incremented blocked count on rowid $rowid\n" if ($verbose);
   }
 
   # FIXME - Should do mail logging?
