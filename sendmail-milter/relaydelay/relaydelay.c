@@ -10,6 +10,7 @@
 #include <libmilter/mfapi.h>
 #include <regex.h>
 #include <pthread.h>
+#include <stdarg.h>
 
 #include "mysql.h"
 
@@ -120,6 +121,22 @@ int check_envelope_address_format = 1;
 */
 int pass_mail_when_db_unavail = 0;
 
+void writelog(int level, char *msg, ...) /* Brad provided this */
+{
+    va_list ap;
+
+	if( verbose >= level )
+	{
+        va_start(ap, msg);
+        vprintf(msg, ap);
+        va_end(ap);
+
+		fflush(stdout);
+	}
+}
+
+
+
 /* ############################################################# */
 MYSQL global_dbh;
 int mysql_connected = 0;
@@ -128,10 +145,8 @@ int load_config(void)
 {
 	extern FILE *relaydelay_in;
 
-	if( verbose )
-		printf("Parsing %s...\n", config_file_name);
+	writelog(1,"Parsing %s...\n", config_file_name);
 	
-
 	relaydelay_in = fopen( config_file_name, "r");
 	if( relaydelay_in == NULL)
 	{
@@ -165,6 +180,7 @@ int load_config(void)
 		printf("  database_host = %s\n", database_host);
 		printf("  database_user = %s\n", database_user);
 		printf("  database_pass = %s\n\n", database_pass);
+		fflush(stdout);
 	}
 	return 0;
 }
@@ -194,7 +210,7 @@ void db_connect(void)
 		}
 		else
 		{
-			printf("Failed to connect to database: Error: %s\n",
+			writelog(1,"Failed to connect to database: Error: %s\n",
 				mysql_error(&global_dbh));
 
 			/* the init will have allocated memory */
@@ -215,24 +231,14 @@ int db_query(char *commandbuf, MYSQL_RES **result)
 	int res;
 	int try_count = 0;
 
-	if( verbose > 1 )
-	{
-		printf("   About to issue query: %s\n", commandbuf);
-		fflush(stdout);
-	}
+	writelog(2,"   About to issue query: %s\n", commandbuf);
 	
 
-	if( verbose > 1 )
-	{
-		printf("   Mutex Locking...\n");
-		fflush(stdout);
-	}
+	writelog(2,"   Mutex Locking...\n");
+
 	pthread_mutex_lock(&mut);
-	if( verbose > 1 )
-	{
-		printf("   Mutex Locked...\n");
-		fflush(stdout);
-	}
+	
+	writelog(2,"   Mutex Locked...\n");
 
 	*result = NULL;
 	do
@@ -240,22 +246,15 @@ int db_query(char *commandbuf, MYSQL_RES **result)
 		db_connect();
 		if( (res = mysql_query(&global_dbh, commandbuf)) == 0 )
 		{
-			if( verbose > 1 )
-			{
-				printf("   Control returns from query:\n");
-				fflush(stdout);
-			}
+			writelog(2,"   Control returns from query:\n");
+			
 			*result = mysql_store_result(&global_dbh);
-			if( verbose > 1 )
-			{
-				printf("   Control returns from store_result:\n");
-				fflush(stdout);
-			}
+
+			writelog(2,"   Control returns from store_result:\n");
 		}
 		else
 		{
-			printf("ERROR: Database Call Failed: %s\n", mysql_error(&global_dbh));
-			fflush(stdout);
+			writelog(1,"ERROR: Database Call Failed: %s\n", mysql_error(&global_dbh));
 			db_disconnect();
 			++try_count;
 		}
@@ -263,19 +262,11 @@ int db_query(char *commandbuf, MYSQL_RES **result)
 	while (try_count < MAX_QUERY_TRIES && res );
 
 	if (try_count >= MAX_QUERY_TRIES)
-		printf("ERROR: Gave up trying to communicate with mysql.\n");
+		writelog(1,"ERROR: Gave up trying to communicate with mysql.\n");
 
-	if( verbose > 1 )
-	{
-		printf("   Mutex UnLocking...\n");
-		fflush(stdout);
-	}
+	writelog(2,"   Mutex UnLocking...\n");
 	pthread_mutex_unlock(&mut);
-	if( verbose > 1 )
-	{
-		printf("   Mutex UnLocked...\n");
-		fflush(stdout);
-	}
+	writelog(2,"   Mutex UnLocked...\n");
 
 	return res;
 }
@@ -316,7 +307,7 @@ int do_regex(char *pattern,
 		{
 			char errbuf[1024];
 			regerror(errcode, preg, errbuf, 1024);
-			printf("Had trouble compiling regex %s (%s)!\n",
+			writelog(1,"Had trouble compiling regex %s (%s)!\n",
 			       pattern, errbuf);
 		}
 		return 1;
@@ -329,7 +320,7 @@ int do_regex(char *pattern,
 		{
 			char errbuf[1024];
 			regerror(errcode, preg, errbuf, 1024);
-			printf("Had trouble execing regex %s on string %s (%s)!\n",
+			writelog(1,"Had trouble execing regex %s on string %s (%s)!\n",
 			       pattern, string, errbuf);
 		}
 		return 1;
@@ -344,14 +335,13 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 	char mail_from_buf[BUFSIZE];
 	char *privdata, buf[BUFSIZE];
 
-	if( verbose > 1 )
-		printf("envfrom Callback:\n");
+	writelog(2,"envfrom Callback:\n");
 
 	if( check_envelope_address_format )
 	{
 		char *mail_mailer = smfi_getsymval(ctx, "{mail_mailer}");
-		if( verbose > 1)
-			printf("   mail_mailer: %s\n", mail_mailer);
+
+		writelog(2,"   mail_mailer: %s\n", mail_mailer);
 
 		strncpy(mail_from_buf, mail_from, SAFESIZ);
 		mail_from_buf[SAFESIZ] = 0;
@@ -381,8 +371,8 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 			regmatch_t pmatch[10];
 			char mail_from_buf2[BUFSIZE], *at, *p1;
 			int errcode;
-			if( verbose > 1 )
-				printf("   mail_from: %s\n", mail_from);
+			
+			writelog(2,"   mail_from: %s\n", mail_from);
 			if( do_regex("^<(.*)>$", mail_from, &preg, pmatch, 0) == 0 )
 			{
 				if( pmatch[1].rm_so != -1 && pmatch[1].rm_eo != -1 )
@@ -486,7 +476,12 @@ int split(char sep, char *str, char ***array)
 {
 	int cnt;
 	char *p, *p1;
-	char *buf = strdup(str);
+	char *buf;
+
+	if( !str )
+		return 0;
+	
+	buf = strdup(str);
 
 	/* sigh, first count up the number of entries */
 	p = buf;
@@ -501,13 +496,13 @@ int split(char sep, char *str, char ***array)
 
 	/* re-parse the string to build the actual array */
 	cnt = 0;
-	*array[cnt++] = buf;
+	(*array)[cnt++] = buf;
 	p = buf;
 	while( (p1=strchr(p,sep)) )
 	{
 		*p1 = 0;           /* null terminate the previous string */
 		p = ++p1;          /* move to the next string */
-		*array[cnt++] = p; /* save the start of the string */
+		(*array)[cnt++] = p; /* save the start of the string */
 	}
 	return cnt;
 }
@@ -531,8 +526,7 @@ sfsistat eom_callback(SMFICTX *ctx)
 	/* Clear our private data on this context */
 	smfi_setpriv(ctx,0);
 
-	if( verbose>1 )
-		printf("IN EOM CALLBACK - PrivData: %s \n", privdata_ref);
+	writelog(2,"IN EOM CALLBACK - PrivData: %s \n", privdata_ref);
 
 	strcpy(buf1, privdata_ref);
 
@@ -573,16 +567,12 @@ sfsistat eom_callback(SMFICTX *ctx)
 			 * due to other causes within sendmail or from the
 			 * milter being inaccessible/timing out.
 			 */
-			if( verbose )
-				printf("EOM: Rowids=%s mail_from=%s\n", rowids, mail_from);
+			writelog(1,"EOM: Rowids=%s mail_from=%s\n", rowids, mail_from);
 			smfi_setreply(ctx, "451", "4.7.1", "Please try again later (TEMPFAIL)") ;
 			return SMFIS_TEMPFAIL;
 
 		}
-		if( verbose > 1 )
-			printf("About to check rowids (%s) and split...\n", rowids);
-		if( verbose )
-			fflush(stdout);
+		writelog(2,"About to check rowids (%s) and split...\n", rowids);
 		
 		
 		if( strlen(rowids) > 0 )
@@ -590,11 +580,7 @@ sfsistat eom_callback(SMFICTX *ctx)
 			char **arr;
 			int i, cnt = split(',', rowids, &arr);
 
-			if( verbose > 1 )
-				printf("Split returns count (%d)...\n", cnt);
-
-			if( verbose )
-				fflush(stdout);
+			writelog(2,"Split returns count (%d)...\n", cnt);
 
 			for( i=0; i<cnt; i++ )
 			{
@@ -611,8 +597,7 @@ sfsistat eom_callback(SMFICTX *ctx)
 					return SMFIS_TEMPFAIL;
 				}
 
-				if( verbose )
-					printf("  * Mail successfully processed.  Incremented passed count on rowid %s.\n", arr[i]);
+				writelog(1,"  * Mail successfully processed.  Incremented passed count on rowid %s.\n", arr[i]);
 
 
 				/*  If configured to do so, then update the lifetime (only on AUTO records) */
@@ -659,13 +644,13 @@ sfsistat abort_callback(SMFICTX *ctx)
 	char *rowids, *mail_from, *rcpt_to;
 	char *t1, *t2, buf1[99000];
 	char **arr;
-	int i, cnt = split(',', rowids, &arr);
+	int i, cnt;
+
 
 	/* Clear our private data on this context */
 	smfi_setpriv(ctx,0);
 
-	if( verbose > 1 )
-		printf("IN abort CALLBACK - PrivData: %s \n", privdata_ref);
+	writelog(2,"IN abort CALLBACK - PrivData: %s \n", privdata_ref);
 
 	strcpy(buf1,privdata_ref);
 	if( privdata_ref )
@@ -693,6 +678,8 @@ sfsistat abort_callback(SMFICTX *ctx)
 	if( !strlen(rowids) )
 		return SMFIS_CONTINUE;
 
+	cnt = split(',', rowids, &arr);
+	
 	for( i=0; i<cnt; i++ )
 	{
 		char commandbuf[8000];
@@ -708,8 +695,7 @@ sfsistat abort_callback(SMFICTX *ctx)
 				return SMFIS_CONTINUE;
 			return SMFIS_TEMPFAIL;
 		}
-		if( verbose )
-			printf("  * Mail was aborted.  Incremented aborted count on rowid %s.\n", arr[i]);
+		writelog(1,"  * Mail was aborted.  Incremented aborted count on rowid %s.\n", arr[i]);
 
 		/* # Check for the special case of no passed messages, means this is probably a
 #   spammer, and we should expire the record so they have to go through the
@@ -724,8 +710,8 @@ sfsistat abort_callback(SMFICTX *ctx)
 			return SMFIS_TEMPFAIL;
 		}
 
-		if( mysql_affected_rows(&global_dbh) && verbose )
-			printf("  * Mail  record had no successful deliveries.  Expired record on rowid %s.\n", arr[i]);
+		if( mysql_affected_rows(&global_dbh)  )
+			writelog(1,"  * Mail  record had no successful deliveries.  Expired record on rowid %s.\n", arr[i]);
 
 	}
 
@@ -762,8 +748,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	regmatch_t pmatch[10];
 	/* Clear our private data on this context */
 
-	if( verbose>1 )
-		printf("Envrcpt callback:   privdata=%s\n", privdata_ref);
+	writelog(2,"Envrcpt callback:   privdata=%s\n", privdata_ref);
 	row_id[0] = 0;
 	rcpt_to = argv[0];
 	strcpy(buf1, privdata_ref);
@@ -792,8 +777,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	mail_from = t1+1;
 
 
-	if( verbose >1 )
-		printf("Stored Sender: %s\nPassed Recipient: %s\n", mail_from, rcpt_to);
+	writelog(2,"Stored Sender: %s\nPassed Recipient: %s\n", mail_from, rcpt_to);
 
 	tmp = smfi_getsymval(ctx,"{_}");
 	relay_ip[0] = 0;
@@ -805,8 +789,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	{
 		if( pmatch[0].rm_so == -1 || pmatch[0].rm_eo == -1 )
 		{
-			if( verbose > 1)
-				printf("Relay info could not be parsed: %s\n",
+				writelog(2,"Relay info could not be parsed: %s\n",
 						tmp);
 		}
 		else
@@ -815,29 +798,25 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			{
 				strncpy(relay_ident,tmp+pmatch[1].rm_so,pmatch[1].rm_eo-pmatch[1].rm_so);
 				relay_ident[pmatch[1].rm_eo-pmatch[1].rm_so] = 0;
-				if( verbose>1 )
-					printf("  Relay Ident: %s\n", relay_ident);
+				writelog(2,"  Relay Ident: %s\n", relay_ident);
 			}
 			if( pmatch[2].rm_so != -1 )
 			{
 				strncpy(relay_name,tmp+pmatch[2].rm_so,pmatch[2].rm_eo-pmatch[2].rm_so);
 				relay_name[pmatch[2].rm_eo-pmatch[2].rm_so] = 0;
-				if( verbose>1 )
-					printf("  Relay name: %s\n", relay_name);
+				writelog(2,"  Relay name: %s\n", relay_name);
 			}
 			if( pmatch[3].rm_so != -1 )
 			{
 				strncpy(relay_ip,tmp+pmatch[3].rm_so,pmatch[3].rm_eo-pmatch[3].rm_so);
 				relay_ip[pmatch[3].rm_eo-pmatch[3].rm_so] = 0;
-				if( verbose>1 )
-					printf("  Relay IP: %s\n", relay_ip);
+				writelog(2,"  Relay IP: %s\n", relay_ip);
 			}
 			if( pmatch[4].rm_so != -1 )
 			{
 				strncpy(relay_maybe_forged,tmp+pmatch[4].rm_so,pmatch[4].rm_eo-pmatch[4].rm_so);
 				relay_maybe_forged[pmatch[4].rm_eo-pmatch[4].rm_so] = 0;
-				if( verbose>1 )
-					printf("  Relay Forged: %s\n", relay_maybe_forged);
+				writelog(2,"  Relay Forged: %s\n", relay_maybe_forged);
 			}
 		}
 	}
@@ -847,11 +826,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	recipient = smfi_getsymval(ctx,"{rcpt_addr}");
 	queue_id = smfi_getsymval(ctx,"{i}");
 
-	if( verbose > 1)
-	{
-		printf("  From: %s  -  To: %s\n", sender, recipient);
-		printf("  InMailer: %s  -  OutMailer: %s   -  QueueID: %s\n", mail_mailer, rcpt_mailer, queue_id);
-	}
+	writelog(2,"  From: %s  -  To: %s\n", sender, recipient);
+	writelog(2,"  InMailer: %s  -  OutMailer: %s   -  QueueID: %s\n", mail_mailer, rcpt_mailer, queue_id);
+
 	/* Only do our processing if the inbound mailer is an smtp variant.
 	   A lot of spam is sent with the null sender address <>.  Sendmail reports
 	   that as being from the local mailer, so we have a special case that needs
@@ -859,9 +836,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	if( !strstr(mail_mailer,"smtp") && ( strcmp(mail_from,"<>") || !strcmp(relay_ip,"127.0.0.1")))
 	{
 		/* we aren't using an smtp-like mailer, so bypass checks */
-		if( verbose )
-			printf("  Mail delivery is not using an smtp-like mailer (%s). (from=%s)  Skipping checks.\n",
-					mail_mailer, mail_from);
+		writelog(1,"  Mail delivery is not using an smtp-like mailer (%s). (from=%s)  Skipping checks.\n",
+				 mail_mailer, mail_from);
 		goto PASS_MAIL;
 	}
 
@@ -898,35 +874,30 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 		if( !result )
 		{
-			if( verbose )
-				printf("  store_result returned NULL\n");
+			writelog(1,"  store_result returned NULL\n");
 			goto DB_FAILURE;
 		}
 
 		if( mysql_num_fields(result) != 3 )
 		{
-			if( verbose > 1 )
-				printf("   Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
+			writelog(1,"   Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
 			goto DB_FAILURE;
 		}
 
 		row = mysql_fetch_row(result);
-		if( verbose>1 )
-			printf("   fetch_row returns %x\n", row);
+		writelog(2,"   fetch_row returns %x\n", row);
 
 		if( row && row[0] && strlen(row[0]) > 0 )
 		{
 			strncpy(row_id, row[0], sizeof(row_id));
 			if( atoi(row[1]) )
 			{
-				if( verbose )
-					printf("  Blacklisted Relay %s[%s]. Skipping checks and rejecting the mail.\n",relay_name, relay_ip);
+				writelog(1,"  Blacklisted Relay %s[%s]. Skipping checks and rejecting the mail.\n",relay_name, relay_ip);
 				goto DELAY_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
-				if( verbose )
-					printf("  Whitelisted Relay %s[%s]. Skipping checks and passing the mail.\n",relay_name, relay_ip);
+				writelog(1,"  Whitelisted Relay %s[%s]. Skipping checks and passing the mail.\n",relay_name, relay_ip);
 				goto PASS_MAIL;
 			}
 		}
@@ -960,7 +931,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		MYSQL_ROW row;
 		int i=0;
 
-		if( verbose>1 ) printf("   rcpt_acct=%s, rcpt_domain=%s, rcpt_to=%s \n", rcpt_acct, rcpt_domain, rcpt_to);
+		writelog(2,"   rcpt_acct=%s, rcpt_domain=%s, rcpt_to=%s \n", rcpt_acct, rcpt_domain, rcpt_to);
 		strcpy(buf2,rcpt_domain);
 		subquery[0] = 0;
 		while( (p2 = strchr(buf2,'.')) && i++ < check_wildcard_rcpt_to)
@@ -988,15 +959,13 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 		if( !result )
 		{
-			if(verbose)
-				printf("   store_result call returned null results!\n");
+			writelog(1,"   store_result call returned null results!\n");
 			goto DB_FAILURE;
 		}
 
 		if( mysql_num_fields(result) != 3 )
 		{
-			if( verbose > 1 )
-				printf("  Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
+			writelog(1,"  Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
 			goto DB_FAILURE;
 		}
 
@@ -1006,14 +975,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			strncpy(row_id, row[0], sizeof(row_id));
 			if( atoi(row[1]) )
 			{
-				if( verbose )
-					printf("  Blacklisted Recpt %s. Skipping checks and rejecting the mail.\n",rcpt_domain);
+				writelog(1,"  Blacklisted Recpt %s. Skipping checks and rejecting the mail.\n",rcpt_domain);
 				goto DELAY_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
-				if( verbose )
-					printf("  Whitelisted Relay %s. Skipping checks and passing the mail.\n", rcpt_domain);
+				writelog(1,"  Whitelisted Relay %s. Skipping checks and passing the mail.\n", rcpt_domain);
 				goto PASS_MAIL;
 			}
 		}
@@ -1047,7 +1014,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		MYSQL_ROW row;
 		int i=0;
 
-		if( verbose>1 ) printf("   from_acct=%s, from_domain=%s, mail_from=%s \n", from_acct, from_domain, mail_from);
+		writelog(2,"   from_acct=%s, from_domain=%s, mail_from=%s \n", from_acct, from_domain, mail_from);
 		strcpy(buf2,from_domain);
 		subquery[0] = 0;
 		while( (p2 = strchr(buf2,'.')) && i++ < check_wildcard_mail_from)
@@ -1075,15 +1042,13 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 		if( !result )
 		{
-			if(verbose)
-				printf("   store_result call returned null results!\n");
+			writelog(1,"   store_result call returned null results!\n");
 			goto DB_FAILURE;
 		}
 
 		if( mysql_num_fields(result) != 3 )
 		{
-			if( verbose > 1 )
-				printf("  Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
+			writelog(1,"  Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
 			goto DB_FAILURE;
 		}
 
@@ -1093,14 +1058,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			strncpy(row_id, row[0], sizeof(row_id));
 			if( atoi(row[1]) )
 			{
-				if( verbose )
-					printf("  Blacklisted Sender %s. Skipping checks and rejecting the mail.\n",mail_from);
+				writelog(1,"  Blacklisted Sender %s. Skipping checks and rejecting the mail.\n",mail_from);
 				goto DELAY_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
-				if( verbose )
-					printf("  Whitelisted Sender %s. Skipping checks and passing the mail.\n", mail_from);
+				writelog(1,"  Whitelisted Sender %s. Skipping checks and passing the mail.\n", mail_from);
 				goto PASS_MAIL;
 			}
 		}
@@ -1127,7 +1090,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		if( rev[0] )
 			strcat(rev,".");
 		strcat(rev,forw);
-		if( verbose>1 ) printf("   Reversed IP: %s\n", rev);
+		writelog(2,"   Reversed IP: %s\n", rev);
 		sprintf(query,"INSERT IGNORE INTO dns_name (relay_ip,relay_name) VALUES ('%s','%s')",
 				relay_ip, rev);
 		if( db_query(query, &result) )
@@ -1141,8 +1104,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				/* Row already exists, so make sure the name is updated */
 				sprintf(query,"UPDATE dns_name SET relay_name = '%s' WHERE relay_ip = '%s'",
 						rev, relay_ip);
-				if( verbose>1 ) printf("   About to make Query: %s\n", query);
-				if( mysql_query(&global_dbh, query) )
+				writelog(2,"   About to make Query: %s\n", query);
+				if( db_query(query,&result) )
 					goto DB_FAILURE;
 			}
 		}
@@ -1196,13 +1159,13 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	{
 		if( block_expired )
 		{
-			if( verbose )printf("  Email is known and block has expired. Passing the mail. Rowid: %s\n", row_id);
+			writelog(1,"  Email is known and block has expired. Passing the mail. Rowid: %s\n", row_id);
 			goto PASS_MAIL;
 		}
 		else
 		{
 			/* the email is known, but the blick has not expired. So return a tempfail. */
-			if( verbose )printf("  Email is known, but the block has not expired. Issueing a tempfail. Rowid: %s\n",
+			writelog(1,"  Email is known, but the block has not expired. Issueing a tempfail. Rowid: %s\n",
 					row_id);
 			goto DELAY_MAIL;
 		}
@@ -1244,8 +1207,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		if( db_query("UNLOCK TABLE", &result) )
 			goto DB_FAILURE;
 
-		if( verbose)
-			printf("  New mail row (%s,%s,%s) successfully inserted.  Issuing a tempfail.  rowid: %s\n", relay_ip, mail_from, rcpt_to, row_id);
+		writelog(1,"  New mail row (%s,%s,%s) successfully inserted.  Issuing a tempfail.  rowid: %s\n", relay_ip, mail_from, rcpt_to, row_id);
 
 		goto DELAY_MAIL;
 	}
@@ -1269,8 +1231,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	{
 		char *privdata2;
 
-		if( verbose > 1)
-			printf("  Delaying tempfail reject until eom phase.\n");
+		writelog(2,"  Delaying tempfail reject until eom phase.\n");
 		/* save that this message needs to be blocked later in the transaction (after eom) */
 		privdata2 = (char *)malloc(strlen(mail_from)+strlen(rcpt_to)+6);
 		sprintf(privdata2,"00\t%s\t%s", mail_from, rcpt_to);
@@ -1394,7 +1355,7 @@ int main(int argc, char **argv)
 	if( load_config() )
 		return 1;
 
-	printf("relaydelay milter version %s\n", VERSION);
+	writelog(1,"relaydelay milter version %s\n", VERSION);
 	db_connect();
 	sprintf(conn_str,"inet:%d@%s", 9876, "localhost" );
 
