@@ -1,5 +1,5 @@
 SENDMAIL=/export/home/murf/sendmail-8.12.9
-VERSION = 0.3
+VERSION = 0.4
 unam = $(strip ${shell /bin/uname})
 
 ifeq ($(unam),SunOS)

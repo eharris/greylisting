@@ -2,7 +2,7 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <stdlib.h>
-#include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <libmilter/mfapi.h>
 #include <regex.h>
@@ -218,7 +218,6 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 	
 	if(verbose>1) printf("envfrom Callback:\n");
 
-	db_disconnect();
 	db_connect();
 
 	if( !config_loaded )
@@ -243,7 +242,7 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 		      #   had to guess by what "looked" normal, or possible. */
 			regex_t preg;
 			regmatch_t pmatch[10];
-			char mail_from_buf2[4096],*at;
+			char mail_from_buf2[4096],*at,*p1;
 			int errcode;
 			if(verbose>1) printf("   mail_from: %s\n", mail_from);
 			if( do_regex(  "^<(.*)>$", mail_from, &preg, pmatch, 0 ) == 0 )
@@ -256,24 +255,26 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 				}	
 				regfree(&preg);
 			}
-			if( strchr(mail_from, ' ') != 0 )
+			if( strpbrk(mail_from, " \t\n\r\f") )
 			{
 				smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: contains whitespace");
 				return SMFIS_REJECT;
 			}
 			/*  # Check for embedded brackets, parens, quotes, slashes, pipes (doublequotes are used at yahoo) */
-			if( do_regex("[<>\\[\\]\\{\\}\\(\\)'\"`/\\\\\\|]", mail_from, &preg, pmatch,0) == 0 )
+			if( strpbrk(mail_from, "<>[]{}()'\"`/\\|") )
 			{
 				smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: invalid punctuation characters");
 				return SMFIS_REJECT;
 			}
-			if( do_regex("^[!-~]*$", mail_from, &preg, pmatch,0) == 0 )
+			p1 = mail_from;
+			while( *p1 )
 			{
-				if( pmatch[0].rm_so == -1 || pmatch[0].rm_eo == -1 )
+				if( *p1 < 33 || *p1 > 126 )
 				{
 					smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: contains invalid characters");
 					return SMFIS_REJECT;
 				}
+				p1++;
 			}
 			/* FIXME there may be others, but can't find docs on what characters are permitted in an address */
 			if( strlen(mail_from) > 0 )
@@ -687,7 +688,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		{
 			/* we aren't using an smtp-like mailer, so bypass checks */
 			if( verbose )
-				printf("  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n");
+				printf("  Mail delivery is not using an smtp-like mailer (%s). (from=%s)  Skipping checks.\n",
+					mail_mailer, mail_from);
 			goto PASS_MAIL;
 		}
 		
