@@ -6,7 +6,11 @@
 # Using Mysql 3.23.2 or later (required for NULLs allowed in indexed fields)
 
 CREATE DATABASE relaydelay;
+
+# Use something like this to create a user that can use the relaydelay database (change for your login info)
 grant select,insert,update,delete on relaydelay.* to db_user@'localhost' identified by 'db_pass';
+
+# Use something like this to remove a user from the db
 #revoke all on relaydelay.* from db_user@'localhost';
 
 USE relaydelay;
@@ -87,39 +91,41 @@ create table mail_log        # Stores a record for every mail delivery attempt
         key(rcpt_to(20))
 );
 
+############################################################################
+#
+# EVERYTHING AFTER HERE IS JUST EXAMPLE QUERIES TO DO SIMPLE REPORTING
+# OR MAINTENANCE QUERIES AGAINST THE DATABASE.  THESE ARE NOT REQUIRED
+# FOR SETTING UP THE DATABASE STRUCTURE.
+#
+############################################################################
+
 # Example wildcard whitelists for subnets
-insert into relaytofrom values (0,'127.0.0.1'   ,NULL,NULL,'0000-00-00 00:00:00','9999-12-31 23:59:59',0,0,0,'MANUAL',NOW(),NOW());
-insert into relaytofrom values (0,'192.168'     ,NULL,NULL,'0000-00-00 00:00:00','9999-12-31 23:59:59',0,0,0,'MANUAL',NOW(),NOW());
+INSERT INTO relaytofrom (relay_ip, record_expires, create_time) VALUES ('127.0.0.1', '9999-12-31 23:59:59', NOW());
+INSERT INTO relaytofrom (relay_ip, record_expires, create_time) VALUES ('192.168', '9999-12-31 23:59:59', NOW());
 
 # Example wildcard whitelist entry for a received domain or subdomain
-insert into relaytofrom values (0,NULL,NULL,'sub.domain.com','0000-00-00 00:00:00','9999-12-31 23:59:59',0,0,0,'MANUAL',NOW(),NOW());
+INSERT INTO relaytofrom (rcpt_to, record_expires, create_time) VALUES ('example.domain.com', '9999-12-31 23:59:59', NOW());
 
 # interesting queries for reporting on db contents
 # get the delay time of the most persistant non-passed mails, in 5 minute buckets
-select convert((UNIX_TIMESTAMP( last_update ) - UNIX_TIMESTAMP( create_time )) / 300, unsigned) as foo, count(*) from relaytofrom
-where record_expires < NOW() and blocked_count > 0 and passed_count = 0 and aborted_count = 0 and last_update > 0 group by foo
-order by foo;
+#select convert((UNIX_TIMESTAMP( last_update ) - UNIX_TIMESTAMP( create_time )) / 300, unsigned) as foo, count(*) from relaytofrom where record_expires < NOW() and blocked_count > 0 and passed_count = 0 and aborted_count = 0 and last_update > 0 group by foo order by foo;
 
 # look at most prolific passed email counts of mail by delivering ip address (subnet)
-select sum(passed_count) as num, substring_index(relay_ip, '.', 3) as net, mail_from, rcpt_to from relaytofrom where passed_count >
-0 group by substring_index(relay_ip, '.', 3) order by num desc limit 100;
+#select sum(passed_count) as num, substring_index(relay_ip, '.', 3) as net, mail_from, rcpt_to from relaytofrom where passed_count > 0 group by substring_index(relay_ip, '.', 3) order by num desc limit 100;
 
 # look at most prolific blocked email counts by subnet
-select sum(blocked_count) as num, substring_index(relay_ip, '.', 3) as net, mail_from, rcpt_to from relaytofrom where passed_count
-= 0 group by substring_index(relay_ip, '.', 3) order by num desc limit 100;
+#select sum(blocked_count) as num, substring_index(relay_ip, '.', 3) as net, mail_from, rcpt_to from relaytofrom where passed_count = 0 group by substring_index(relay_ip, '.', 3) order by num desc limit 100;
 
 # Look at number of unique triplets as relates to number of passed and blocked emails grouped by ip.
-select count(*) as mails,relay_ip,sum(blocked_count) as blocked,sum(passed_count) as passed from relaytofrom group by relay_ip
-order by blocked;
+#select count(*) as mails,relay_ip,sum(blocked_count) as blocked,sum(passed_count) as passed from relaytofrom group by relay_ip order by blocked;
 
-# Interesting to identify likely recurrent spammers that get through (may be legit tho) (only useful after a decent amount of
-runtime)
-select count(*) as num,relay_ip,mail_from,rcpt_to,create_time,sum(blocked_count),sum(passed_count),sum(aborted_count) from
-relaytofrom where passed_count = 1 group by left(reverse(mail_from),10) order by num;
+# Interesting to identify likely recurrent spammers that get through (may be legit tho) 
+# (only useful after a decent amount of runtime)
+#select count(*) as num,relay_ip,mail_from,rcpt_to,create_time,sum(blocked_count),sum(passed_count),sum(aborted_count) from relaytofrom where passed_count = 1 group by left(reverse(mail_from),10) order by num;
 
 # Useful to find relays that should be manually whitelisted (if trusted) because of VERP with email tracking
 #   but this can also be useful to find semi-legit spammers that don't change ip's.
-select count(*) as num, relay_ip from relaytofrom where passed_count = 1 group by substring_index(relay_ip, '.', 3) order by num;
+#select count(*) as num, relay_ip from relaytofrom where passed_count = 1 group by substring_index(relay_ip, '.', 3) order by num;
 
 # WARNING - the following queries that use a. and b. prefixes are very
 # long-running, since they are basically cross products.  Be prepared for it
@@ -128,15 +134,9 @@ select count(*) as num, relay_ip from relaytofrom where passed_count = 1 group b
 # that could make them better, but oh well.
 
 # Look at emails with same from and to addrs, but different ips (usually spammers using distributed zombies)
-select a.id, a.relay_ip, b.relay_ip, sum(a.blocked_count) / count(*) as blkd, sum(a.passed_count) / count(*) as pass, a.mail_from,
-a.rcpt_to from relaytofrom a, relaytofrom b where a.mail_from = b.mail_from and a.rcpt_to = b.rcpt_to and a.id < b.id and
-a.relay_ip!= b.relay_ip and a.origin_type = 'AUTO' and b.origin_type = 'AUTO' group by a.id order by a.mail_from;
+#select a.id, a.relay_ip, b.relay_ip, sum(a.blocked_count) / count(*) as blkd, sum(a.passed_count) / count(*) as pass, a.mail_from, a.rcpt_to from relaytofrom a, relaytofrom b where a.mail_from = b.mail_from and a.rcpt_to = b.rcpt_to and a.id < b.id and a.relay_ip!= b.relay_ip and a.origin_type = 'AUTO' and b.origin_type = 'AUTO' group by a.id order by a.mail_from;
 
 # Look at emails with same from and to, but create times that differ by at least 5 min
-select a.id, a.relay_ip, b.relay_ip, sum(a.blocked_count) / count(*) as blkd, sum(a.passed_count) / count(*) as pass,
-abs(time_to_sec(a.create_time) - time_to_sec(b.create_time)) as diffcreate, a.mail_from, a.rcpt_to from relaytofrom a, relaytofrom
-b where a.mail_from = b.mail_from and a.rcpt_to = b.rcpt_to and a.id < b.id and a.relay_ip != b.relay_ip and a.origin_type = 'AUTO'
-and b.origin_type = 'AUTO' and abs(time_to_sec(a.create_time) - time_to_sec(b.create_time)) > 300 and a.aborted_count = 0 and
-b.aborted_count = 0 group by a.id order by a.mail_from;
+#select a.id, a.relay_ip, b.relay_ip, sum(a.blocked_count) / count(*) as blkd, sum(a.passed_count) / count(*) as pass, abs(time_to_sec(a.create_time) - time_to_sec(b.create_time)) as diffcreate, a.mail_from, a.rcpt_to from relaytofrom a, relaytofrom b where a.mail_from = b.mail_from and a.rcpt_to = b.rcpt_to and a.id < b.id and a.relay_ip != b.relay_ip and a.origin_type = 'AUTO' and b.origin_type = 'AUTO' and abs(time_to_sec(a.create_time) - time_to_sec(b.create_time)) > 300 and a.aborted_count = 0 and b.aborted_count = 0 group by a.id order by a.mail_from; 
 
 
