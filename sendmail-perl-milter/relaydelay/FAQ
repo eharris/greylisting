@@ -32,4 +32,16 @@ A. Several versions of Redhat and Suse shipped with non-threadsafe versions
    of the DBD mysql modules for your distrobution, or use the ones from 
    CPAN.
 
+Q. I'm trying to use PMilter instead of Sendmail::PMilter for with the 
+   relaydelay code, but I'm getting errors about getsymval and missing 
+   macros.
+
+A. PMilter seems to have a bug regarding not preserving macro info from 
+   previous callbacks even though it should.  According to Susan Barnes,
+   though the developer of PMilter has promised to fix this problem, 
+   it can currently be worked around by adding this line to your 
+   sendmail.mc:
+
+   define(`confMILTER_MACROS_ENVRCPT', confMILTER_MACROS_ENVRCPT``, {i}, {auth_type}, {auth_authen}, {auth_ssf}, {auth_author}, {mail_mailer},{mail_host}, {mail_addr}, {if_addr},  {_}'')dnl
+
 
