@@ -1,8 +1,12 @@
-
+#!/usr/bin/perl
 
 #############################################################################
 #
 # File: relaydelay.pl
+#
+# Version: 0.01
+# 
+# Programmer: Evan J. Harris <eharris@puremagic.com>
 #
 # Description:
 #   Sendmail::Milter interface for active blocking of spam using the 
@@ -14,11 +18,17 @@
 #   For SMTP info, see RFC821, RFC1891, RFC1893
 #
 # Notes:
+#   - Probably should store the mail_from and rcpt_to fields in the db in reversed character order.
+#     This would make reporting on subdomain matches be able to be indexed.
+#   - Should remove the table lock that ensures non-duplicate rows.  Unfortunately, the cure is probably
+#     worse than the disease.
 #
 # Bugs:
+#   None known.
 #
 #
-# *** Copyright 2003 by Evan J. Harris - All Rights Reserved ***
+# *** Copyright 2003 by Evan J. Harris --- All Rights Reserved ***
+# *** No warranties expressed or implied, use at your own risk ***
 #
 #############################################################################
 
@@ -28,7 +38,6 @@ use Socket;
 use Errno qw(ENOENT);
 
 use DBI;
-#use Sys::Hostname;
 
 use strict;
 
@@ -41,6 +50,10 @@ my $config_file = "/etc/mail/relaydelay.conf";
 #################################################################
 # Our global settings that may be overridden from the config file
 #################################################################
+
+# If you do/don't want to see debugging messages printed to stdout,
+#   then set this appropriately.
+my $verbose = 1;
 
 # Database connection params
 my $database_type = 'mysql';
@@ -113,14 +126,6 @@ my $enable_relay_name_updates = 1;
 #   option that can be disabled.
 my $check_envelope_address_format = 1;
 
-# Set this to a postive number to slow down responses to blocked connections
-#   by a random number of seconds up to this value (a simple way to tarpit
-#   probable spammers connections)
-# NOTE: The sendmail settings for this milter must be long enough so this 
-#   delay plus the normal processing time doesn't cause a timeout)
-# FIXME - NOT YET IMPLEMENTED
-my $blocked_response_delay_secs = 30;
-
 # Set this to true if you wish to disable checking and just pass
 #   mail when the db connection fails.  Otherwise, we will reject
 #   all the mail with a tempfail if we are unable to check the 
@@ -136,17 +141,10 @@ my $pass_mail_when_db_unavail = 0;
 #############################################################
 
 
-# Global vars that should not be in the external config file
+# Global vars that should probably not be in the external config file
 my $global_dbh;
 my $config_loaded;
-my $verbose = 1;
 
-
-
-# Possible dynamic blocking at firewall level
-#iptables -A dynamic_smtp_blocks -s $relay_ip -j DROP
-# And empty the list
-#iptables -F dynamic_smtp_blocks
 
 #######################################################################
 # Database functions
@@ -156,21 +154,14 @@ sub db_connect($) {
   my $verbose = shift;
 
   return $global_dbh if (defined $global_dbh);
-  #my $driver = 'mysql';
-  #my $database = '';
-  #my $host = '127.0.0.1';
-  #my $host = 'localhost';
-  #my $user = '';
-  #my $password = '';
 
   my $dsn = "DBI:$database_type:database=$database_name:host=$database_host:port=$database_port";
   print "DBI Connecting to $dsn\n" if $verbose;
 
   # Note: We do all manual error checking for db errors
   my $dbh = DBI->connect($dsn, $database_user, $database_pass, 
-                         { PrintError => 0, RaiseError => 0 });
+                         { PrintError => 0, RaiseError => $verbose });
 
-  #print "DBI Connect Completed.\n";
   $global_dbh = $dbh;
   return $global_dbh;
 }
@@ -181,41 +172,6 @@ sub db_disconnect {
   return 0;
 }
 
-#sub DoSingleValueQuery($)
-#{ 
-#  my $query = shift;
-#
-#  my $dbh = db_connect(0);
-#  die "$DBI::errstr\n" unless($dbh);
-#  # execute the query and retrieve the first row, first value 
-#  #   NOTE: there is no way to distinquish the row not existing from
-#  #     the value of the first item in the results being NULL.
-#  #     Use with caution.
-#  my $value = $dbh->selectrow_array($query);
-#  # return it
-#  return $value;
-#}
-#
-#sub DoSingleRowQuery($)
-#{
-#  my $query = shift;
-#
-#  my $dbh = db_connect(0);
-#  die "$DBI::errstr\n" unless($dbh);
-#  # execute the query and retrieve the first row
-#  my @arr = $dbh->selectrow_array($query);
-#  return @arr;
-#}
-#
-#sub DoStatement($)
-#{
-#  my $query = shift;
-#
-#  my $dbh = db_connect(0);
-#  die "$DBI::errstr\n" unless($dbh);
-#  my $rows_affected = $dbh->do($query);
-#  return $rows_affected;
-#}
 
 #############################################################################
 #
@@ -228,6 +184,7 @@ sub db_disconnect {
 #  $ctx is a blessed reference of package Sendmail::Milter::Context to something
 #  yucky, but the Mail Filter API routines are available as object methods
 #  (sans the smfi_ prefix) from this
+#
 #############################################################################
 
 # I wasn't going to originally have a envfrom callback, but since the envelope
@@ -239,58 +196,71 @@ sub envfrom_callback
   my $ctx = shift;
   my @args = @_;
 
-  # Make sure we have the config information
+  # Make sure we have the config information loaded
   load_config();
 
-  if ($check_envelope_address_format) {
-    # Check the envelope sender address, and make sure is well-formed.
-    #   If is invalid, then issue a permanent failure telling why.
-    # NOTE: Some of these tests may exclude valid addresses, but I've only seen spammers
-    #   use the ones specifically disallowed here, and they sure don't look valid.  But,
-    #   since the SMTP specs do not strictly define what is allowed in an address, I
-    #   had to guess by what "looked" normal, or possible.
-    my $tstr = $args[0];
-    if ($tstr =~ /\A<(.*)>\Z/) {  # Remove outer angle brackets
-      $tstr = $1;
-      # Note: angle brackets are not required, as some legitimate things seem to not use them
-    }
-    # Check for embedded whitespace
-    if ($tstr =~ /[\s]/) {
-      $ctx->setreply("501", "5.1.7", "Malformed envelope from address: contains whitespace");
-      return SMFIS_REJECT;
-    }
-    # Check for embedded brackets, parens, quotes, slashes, pipes
-    if ($tstr =~ /[<>\[\]\{\}\(\)'"`\/\\\|]/) {
-      $ctx->setreply("501", "5.1.7", "Malformed envelope from address: invalid punctuation characters");
-      return SMFIS_REJECT;
-    }
-    # Any chars outside of the range of 33 to 126 decimal (we check as every char being within that range)
-    #   Note that we do not require any chars to be in the string, this allows the null sender
-    if ($tstr !~ /\A[!-~]*\Z/) {
-      $ctx->setreply("501", "5.1.7", "Malformed envelope from address: contains invalid characters");
-      return SMFIS_REJECT;
-    }
-    # FIXME there may be others, but can't find docs on what characters are permitted in an address
+  my $mail_from = $args[0];
 
-    # Now validate parts of sender address (but only if it's not the null sender)
-    if ($tstr ne "") {
-      my ($from_acct, $from_domain) = split("@", $tstr, 2);
-      if ($from_acct eq "") {
-        $ctx->setreply("501", "5.1.7", "Malformed envelope from address: user part empty");
+  if ($check_envelope_address_format) {
+    # Get the mailer type
+    my $mail_mailer = $ctx->getsymval("{mail_mailer}");
+    
+    # Only do format checks if the inbound mailer is an smtp variant.
+    if ($mail_mailer !~ /smtp\Z/i) {
+      # we aren't using an smtp-like mailer, so bypass checks
+      #print "Envelope From: Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
+    }
+    else {
+      # Check the envelope sender address, and make sure is well-formed.
+      #   If is invalid, then issue a permanent failure telling why.
+      # NOTE: Some of these tests may exclude valid addresses, but I've only seen spammers
+      #   use the ones specifically disallowed here, and they sure don't look valid.  But,
+      #   since the SMTP specs do not strictly define what is allowed in an address, I
+      #   had to guess by what "looked" normal, or possible.
+      my $tstr = $args[0];
+      if ($tstr =~ /\A<(.*)>\Z/) {  # Remove outer angle brackets
+        $tstr = $1;
+        # Note: angle brackets are not required, as some legitimate things seem to not use them
+      }
+      # Check for embedded whitespace
+      if ($tstr =~ /[\s]/) {
+        $ctx->setreply("501", "5.1.7", "Malformed envelope from address: contains whitespace");
         return SMFIS_REJECT;
       }
-      if ($from_domain eq "") {
-        $ctx->setreply("501", "5.1.7", "Malformed envelope from address: domain part empty");
+      # Check for embedded brackets, parens, quotes, slashes, pipes (doublequotes are used at yahoo)
+      if ($tstr =~ /[<>\[\]\{\}\(\)'"`\/\\\|]/) {
+        $ctx->setreply("501", "5.1.7", "Malformed envelope from address: invalid punctuation characters");
         return SMFIS_REJECT;
       }
-      if ($from_domain =~ /@/) {
-        $ctx->setreply("501", "5.1.7", "Malformed envelope from address: too many at signs");
+      # Any chars outside of the range of 33 to 126 decimal (we check as every char being within that range)
+      #   Note that we do not require any chars to be in the string, this allows the null sender
+      if ($tstr !~ /\A[!-~]*\Z/) {
+        $ctx->setreply("501", "5.1.7", "Malformed envelope from address: contains invalid characters");
         return SMFIS_REJECT;
       }
-      # make sure the domain part is well-formed, and contains at least 2 parts
-      if ($from_domain !~ /\A[\w\-]+\.([\w\-]+\.)*[0-9a-zA-Z]+\Z/) {
-        $ctx->setreply("501", "5.1.7", "Malformed envelope from address: domain part invalid");
-        return SMFIS_REJECT;
+      # FIXME there may be others, but can't find docs on what characters are permitted in an address
+
+      # Now validate parts of sender address (but only if it's not the null sender)
+      if ($tstr ne "") {
+        my ($from_acct, $from_domain) = split("@", $tstr, 2);
+        if ($from_acct eq "") {
+          $ctx->setreply("501", "5.1.7", "Malformed envelope from address: user part empty");
+          return SMFIS_REJECT;
+        }
+        if ($from_domain eq "") {
+          $ctx->setreply("501", "5.1.7", "Malformed envelope from address: domain part empty");
+          return SMFIS_REJECT;
+        }
+        if ($from_domain =~ /@/) {
+          $ctx->setreply("501", "5.1.7", "Malformed envelope from address: too many at signs");
+          return SMFIS_REJECT;
+        }
+        # make sure the domain part is well-formed.
+        #if ($from_domain !~ /\A[\w\-]+\.([\w\-]+\.)*[0-9a-zA-Z]+\Z/) {  # Use this to require 2 domain parts
+        if ($from_domain !~ /\A([\w\-]+\.)*[\w\-]+\Z/) {
+          $ctx->setreply("501", "5.1.7", "Malformed envelope from address: domain part invalid");
+          return SMFIS_REJECT;
+        }
       }
     }
   }
@@ -302,7 +272,7 @@ sub envfrom_callback
   #   I would have really rather used a hash or other data structure, 
   #     but when I tried it, Sendmail::Milter seemed to choke on it
   #     and would eventually segfault.  So went back to using a scalar.
-  my $privdata = "0\x00$args[0]\x00";
+  my $privdata = "0\x00$mail_from\x00";
   $ctx->setpriv(\$privdata);
 
   return SMFIS_CONTINUE;
@@ -343,7 +313,7 @@ sub eom_callback
   }
   
   # If and only if this message is from the null sender, check to see if we should tempfail it
-  #   (since we can't delay it after rcpt_to since that breaks exim's recipient callbacks)
+  #   (since we can't delay it after rcpt_to since that breaks SMTP callbacks)
   #   (We use a special rowid value of 00 to indicate a needed block)
   if ($rowids eq "00" and ($mail_from eq "<>" or $tempfail_messages_after_data_phase)) {
     # Set the reply code to the normal default, but with a modified text part.
@@ -542,36 +512,25 @@ sub envrcpt_callback
     goto PASS_MAIL;
   }
 
-  if ($check_envelope_address_format) {
-    # Check the mail recipient, and make sure is well-formed.  Bounce mail telling why if not.
-    my $tstr = $rcpt_to;
-    if ($tstr =~ /\A<(.*)>\Z/) {  # Remove outer angle brackets if present
-      $tstr = $1;
-    }
-    #goto BOUNCE_MAIL;
-  }
-        
-  # Check for local IP relay whitelisting from the access file
+  # Check for local IP relay whitelisting from the sendmail access file
   # FIXME - needs to be implemented
   #
 
   # Check wildcard black or whitelisting based on ip address or subnet
   #   Do the check in such a way that more exact matches are returned first
   if ($check_wildcard_relay_ip) {
-    my $net24 = $relay_ip;  
-    $net24 =~ s/\A(.*)\.\d+\Z/$1/;  # strip off the last octet
-    my $net16 = $net24;  
-    $net16 =~ s/\A(.*)\.\d+\Z/$1/;
-    my $net8  = $net16;
-    $net8  =~ s/\A(.*)\.\d+\Z/$1/;
+    my $tstr = $relay_ip;
+    my $subquery;
+    for (my $loop = 0; $loop < 4; $loop++) {
+      $subquery .= " OR " if (defined($subquery));
+      $subquery .= "relay_ip = " . $dbh->quote($tstr);
+      $tstr =~ s/\A(.*)\.\d+\Z/$1/;  # strip off the last octet
+    }
     my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
       .         "  WHERE record_expires > NOW() "
       .         "    AND mail_from IS NULL "
       .         "    AND rcpt_to   IS NULL "
-      .         "    AND (relay_ip = '$relay_ip' "
-      .         "      OR relay_ip = '$net24' "
-      .         "      OR relay_ip = '$net16' "
-      .         "      OR relay_ip = '$net8') "
+      .         "    AND ($subquery) "
       .         "  ORDER BY length(relay_ip) DESC";
 
     my $sth = $dbh->prepare($query) or goto DB_FAILURE;
@@ -592,16 +551,30 @@ sub envrcpt_callback
     }
   }
 
+  # Pull out the domain of the recipient for whitelisting checks
+  my $tstr = $rcpt_to;
+  if ($tstr =~ /\A<(.*)>\Z/) {  # Remove outer angle brackets if present
+    $tstr = $1;
+  }
+  $tstr =~ /@([^@]*)\Z/;  # strip off everything before and including the last @
+  my $rcpt_domain = $1;
+
   # See if this recipient (or domain/subdomain) is wildcard white/blacklisted
-  # NOTE: we only check partial domain matches up to 4 levels deep
-  # FIXME - domain part not yet implemented
+  #   Do the check in such a way that more exact matches are returned first
   if ($check_wildcard_rcpt_to) {
+    my $subquery = "rcpt_to = " . $dbh->quote($rcpt_to);
+    my $tstr = $rcpt_domain;
+    while(index($tstr, ".") > 0) {
+      $subquery .= " OR rcpt_to = " . $dbh->quote($tstr);
+      $tstr =~ s/\A[^.]*\.(.*)\Z/$1/;  # strip off the leftmost domain part
+    }
     my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
       .         "  WHERE record_expires > NOW() "
       .         "    AND relay_ip  IS NULL "
       .         "    AND mail_from IS NULL "
-      .         "    AND rcpt_to   = " . $dbh->quote($rcpt_to);
-      
+      .         "    AND ($subquery) "
+      .         "  ORDER BY length(rcpt_to) DESC";
+
     my $sth = $dbh->prepare($query) or goto DB_FAILURE;
     $sth->execute() or goto DB_FAILURE;
     ($rowid, my $blacklisted, my $whitelisted) = $sth->fetchrow_array();
@@ -713,7 +686,7 @@ sub envrcpt_callback
     $dbh->do("UPDATE relaytofrom SET blocked_count = blocked_count + 1 WHERE id = $rowid") or goto DB_FAILURE;
   }
 
-  # FIXME - And do mail logging
+  # FIXME - Should do mail logging?
   
   # Special handling for null sender.  Spammers use it a ton, but so do things like exim's callback sender
   #   verification spam checks.  If the sender is the null sender, we don't want to block it now, but will
@@ -786,7 +759,7 @@ sub envrcpt_callback
   my $privdata = "$rowids\x00$mail_from\x00$rcpt_to";
   $ctx->setpriv(\$privdata);
 
-  # FIXME - Need to do mail logging?
+  # FIXME - Should do mail logging?
  
   # And indicate the message should continue processing.
   return SMFIS_CONTINUE;
