@@ -3,6 +3,10 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+0.03 - Release
+
+  2003-07-19 - A few cosmetic changes and comment updates.
+
   2003-07-15 - Added an update whereby manual whitelist entries for localhost
     and other local interface addresses are no longer necessary, as the 
     milter now considers any mail that is "looped back" on a local interface
@@ -58,7 +62,8 @@ UNRELEASED -
     treat any email from postmaster@ as a callback and delay the tempfail
     until after the DATA phase.
 
-0.02 - 
+0.02 - Release
+
   2003-06-26 - Allowed for setting the initial delay to 0 seconds, which 
     allows new users to run in a "learning only" mode where no emails
     will be tempfailed.  Also, if the initial delay is set to a negative
