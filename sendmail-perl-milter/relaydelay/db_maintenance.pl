@@ -4,7 +4,7 @@
 #
 # File: db_maintenance.pl
 #
-# Version: 0.01
+# Version: 1.0
 # 
 # Programmer: Evan J. Harris <eharris@puremagic.com>
 #
@@ -13,24 +13,30 @@
 #   as created from dbdef.sql.  Will copy all rows out of the main 
 #   relaytofrom table into the reporting table, and then delete the
 #   expired ones from the main table.  Not required for the implementation,
-#   but helps keep the database smaller.
+#   but helps keep the active database smaller/faster without losing any
+#   data that may be useful for profiling.
 #
 # References:
 #   For Greylisting info, see http://projects.puremagic.com/greylisting/
 #   For SMTP info, see RFC821, RFC1891, RFC1893
 #
 # Notes:
+#   - The new parameters chunk_size and sleep_secs helps limit the impact 
+#     that the maintenance has on the db, since the db intensive copy/delete
+#     queries lock the db during their execution.  If your db is very large,
+#     you will want to set these accordingly.
 #   - If you want to optimize the active table (relaytofrom), keep in mind
-#     that it will cause the table to be locked from updates for a few
-#     seconds or minutes depending on table size and speed of db machine.
+#     that it will cause the table to be locked from updates for a few 
+#     seconds to several minutes depending on table size and speed of the
+#     db machine and the network connection to it.
 #   - May also be run more or less often than nightly if desired.
 #
 # Bugs:
 #   None known.
 #
 #
-# *** Copyright 2003 by Evan J. Harris --- All Rights Reserved ***
-# *** No warranties expressed or implied, use at your own risk ***
+# *** Copyright 2003-2004 by Evan J. Harris - All Rights Reserved ***
+# *** No warranties expressed or implied, use at your own risk    ***
 #
 #############################################################################
 
@@ -66,9 +72,16 @@ my $database_pass = 'db_pass';
 # End of options for use in external config file
 #############################################################
 
+# Set this to the chunk size you want to process records in
+my $chunk_size = 1000;
+
+# Set this to the number of seconds to sleep between copy/delete
+#   chunks (so other clients can get some work done)
+my $sleep_secs = 1;
+
 # Set this to nonzero if you wish to optimize the active table
 #   after deleting the rows moved to the reporting table.
-my $optimize_active_table = 1;
+my $optimize_active_table = 0;
 
 # Global vars that should probably not be in the external config file
 my $global_dbh;
@@ -140,17 +153,49 @@ BEGIN:
   my $dbh = db_connect(1);
   die "$DBI::errstr\n" unless($dbh);
 
-  # copy ALL rows to the reporting table, replacing any existing rows
-  my $rows = $dbh->do("REPLACE INTO relayreport SELECT * FROM relaytofrom");
-  print "$rows copied/updated to reporting table\n";
+  # Get the current DB server time for use in later queries (minus one second to 
+  #   work around possible race)
+  my $now = $dbh->selectrow_array("SELECT NOW()");
+  print "DB Server Time: $now\n";
 
-  # delete any rows that expired more than an hour ago
-  my $rows = $dbh->do("DELETE FROM relaytofrom WHERE record_expires < NOW() - INTERVAL 1 HOUR AND origin_type = 'AUTO'");
-  print "$rows expired rows deleted from active table\n";
+  my $highest_id = $dbh->selectrow_array("SELECT MAX(id) FROM relaytofrom");
+  print "Highest ID: $highest_id\n";
 
-  # optimize the active table
-  #$dbh->do("OPTIMIZE TABLE relaytofrom");
-  #print "Optimized active table.\n";
+  my $first = 1;
+  my $last = 0;
+  my $copied = 0;
+  my $deleted = 0;
+  while ($last < $highest_id) {
+  
+    # Query to find out what the last id was that will be copied in this iteration
+    my $ids = $dbh->selectcol_arrayref("SELECT id FROM relaytofrom WHERE id >= $first ORDER BY id LIMIT $chunk_size");
+
+    my $maxindex = $#$ids;
+    $last = $$ids[$maxindex];
+    $copied += $maxindex + 1;
+
+    # Copy selected row range to the reporting table, replacing any existing rows
+    $dbh->do("REPLACE INTO relayreport SELECT * FROM relaytofrom WHERE id >= $first AND id <= $last");
+
+    my $rows = $dbh->do("DELETE FROM relaytofrom WHERE record_expires < '$now' AND origin_type = 'AUTO' AND id <= $last");
+    $rows += 0;
+    $deleted += $rows;
+
+    print "Copied: " . ($maxindex + 1) . " - Deleted: $rows - Last Row: $last\n";
+
+    sleep($sleep_secs);
+
+    $first = $last + 1;
+  }
+
+  print "\nSummary: \n";
+  print "  Total Copied: $copied\n";
+  print "  Total Deleted: $deleted\n";
+
+  if ($optimize_active_table) {
+    $dbh->do("OPTIMIZE TABLE relaytofrom");
+    print "Optimized active table.\n";
+  }
 
 }
 
