@@ -352,6 +352,7 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 		{
 			/* we aren't using an smtp-like mailer, so bypass checks
 			 * SMM: I see stuff like "local" from MS Outlook, etc
+			 * AND: I see some spammers using "local" also...
 			 */
 		}
 		else
@@ -781,13 +782,15 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	if( !t1 )
 	{
 		writelog(1,"Error: Unexpected: No tab in the privdata (%s)!\n",buf1 );
+		t2 = 0;
 	}
-	
-
-	t2 = strchr(t1+1, '\t');
-	if( !t2 )
+	else
 	{
-		writelog(1,"Error: Unexpected: No 2nd tab in the privdata (%s)!\n",buf1 );
+		t2 = strchr(t1+1, '\t');
+		if( !t2 )
+		{
+			writelog(1,"Error: Unexpected: No 2nd tab in the privdata (%s)!\n",buf1 );
+		}
 	}
 	
 	if( t1 && t2 )
@@ -880,12 +883,12 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	}
 
         /* Check to see if the mail is looped back on a local interface and skip checks if so */
-	if( (if_addr && strcmp(if_addr,relay_ip) == 0) || !strcmp(mail_mailer,"local") || !strcmp(relay_ip,"127.0.0.1") )
+	if( (if_addr && strcmp(if_addr,relay_ip) == 0) || ( !strcmp(relay_ip,"127.0.0.1") ) )
 	{
 		/* we are using an smtp-like mailer, and we are a local connection, so bypass checks */
 		if( if_addr )
-			writelog(1,"  Mail delivery is sent from a local interface (%s).  Skipping checks.\n",
-					 if_addr);
+			writelog(1,"  Mail delivery is sent from a local interface (%s=%s)[mailer=%s].  Skipping checks.\n",
+					 relay_ip, if_addr, mail_mailer );
 		else
 			writelog(1,"  Mail delivery is sent from a local interface (%s) (ip=%s).  Skipping checks.\n",
 					 mail_mailer, relay_ip);
@@ -1343,7 +1346,7 @@ WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'",
 	/* Save our privdata1 for the next callback (don't add this rowid, since have already handled it) */
 	privdata_ref = (char*)malloc(strlen(privdata_copy)+1);
 	strcpy(privdata_ref,privdata_copy);
-	smfi_setpriv(ctx,privdata1);
+	smfi_setpriv(ctx,privdata_ref);
 	privdata_copy[0] = 0;
 	privdata_ref = 0;
 
@@ -1354,7 +1357,7 @@ WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'",
 	return SMFIS_TEMPFAIL;
 
 	BOUNCE_MAIL:
-	/* set privdata1 so later callbacks won't have problems */
+	/* set privdata so later callbacks won't have problems */
 	privdata_ref = (char*)malloc(3);
 	strcpy(privdata_ref,"0");
 
