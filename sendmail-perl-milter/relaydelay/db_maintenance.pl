@@ -149,6 +149,9 @@ BEGIN:
   # load config file before we start
   load_config();
 
+  # Flush output at every write
+  $| = 1;
+
   # connect to the database 
   my $dbh = db_connect(1);
   die "$DBI::errstr\n" unless($dbh);
@@ -173,15 +176,16 @@ BEGIN:
     my $maxindex = $#$ids;
     $last = $$ids[$maxindex];
     $copied += $maxindex + 1;
+    print "Last Row: $last";
 
     # Copy selected row range to the reporting table, replacing any existing rows
     $dbh->do("REPLACE INTO relayreport SELECT * FROM relaytofrom WHERE id >= $first AND id <= $last");
+    print " - Copied: " . ($maxindex + 1);
 
     my $rows = $dbh->do("DELETE FROM relaytofrom WHERE record_expires < '$now' AND origin_type = 'AUTO' AND id <= $last");
     $rows += 0;
     $deleted += $rows;
-
-    print "Copied: " . ($maxindex + 1) . " - Deleted: $rows - Last Row: $last\n";
+    print " - Deleted: $rows\n";
 
     sleep($sleep_secs);
 
