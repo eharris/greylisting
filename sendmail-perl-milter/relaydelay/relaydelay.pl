@@ -37,6 +37,7 @@ use POSIX qw(strftime);
 use Errno qw(ENOENT);
 
 use DB_File;
+use BerkeleyDB;
 use DBI;
 
 use strict;
@@ -206,6 +207,13 @@ my $reverse_mail_tracking = 1;
 #   used if $reverse_mail_tracking is enabled.
 my $reverse_mail_life_secs = 4 * 24 * 3600;  # 4 Days
 
+# This controls the amount of time we tarpit a RCPT command before 
+# tempfailing it.  It should not be so large as to cause legit
+# mailers to drop the connection because we haven't responded yet.
+# It must also be smaller than the time sendmail allows the milter
+# or else sendmail will consider the milter unavailable.
+my $rcpt_to_tarpit_secs = 30;
+
 
 #############################################################
 # End of options for use in external config file
@@ -221,10 +229,12 @@ my $config_loaded;
 # Constant Definitions
 #######################################################################
 
-use constant DNS_MAYBE_FORGED => 0x0001;
-use constant HELO_MISMATCH    => 0x0002;
-use constant HELO_INVALID     => 0x0004;
-use constant HELO_FORGED      => 0x0008;
+use constant DNS_MAYBE_FORGED  => 0x0001;
+use constant HELO_MISMATCH     => 0x0002;
+use constant HELO_INVALID      => 0x0004;
+use constant HELO_FORGED       => 0x0008;
+use constant HELO_DNS_FAIL     => 0x0010;
+use constant HELO_IP_MISMATCH  => 0x0020;
 
 #######################################################################
 # Database functions
@@ -252,6 +262,75 @@ sub db_disconnect {
   return 0;
 }
 
+
+# This function looks up a domain in the relaydelay database, and returns the id
+#   If the domain does not exist, it inserts a record for it.
+#   If the db functions fail, returns undef.
+sub insert_domain($$) {
+  my $dbh = shift;
+  my $domain = $dbh->quote(reverse(shift));
+
+  my $id;
+  my $rows = $dbh->do("INSERT IGNORE INTO domain (name) VALUES ($domain)");
+  return undef if (!defined($rows));
+  if ($rows > 0) {
+    $id = $dbh->selectrow_array("SELECT LAST_INSERT_ID()");
+  }
+  else {
+    $id = $dbh->selectrow_array("SELECT id FROM domain WHERE domain = $domain");
+  }
+  return $id;
+}
+
+# This function looks up an email address in the relaydelay database, and returns the id
+#   If the address does not exist, it inserts a record for it.
+#   If the db functions fail, returns undef.
+sub insert_email($$$) {
+  my $dbh = shift;
+  my $user = $dbh->quote(shift);
+  my $domain = shift;
+
+  my $domain_id = insert_domain($dbh, $domain);
+  return undef if (!defined($domain_id));
+
+  my $id;
+  my $rows = $dbh->do("INSERT IGNORE INTO email () VALUES ($domain)");
+  return undef if (!defined($rows));
+  if ($rows > 0) {
+    $id = $dbh->selectrow_array("SELECT LAST_INSERT_ID()");
+  }
+  else {
+    $id = $dbh->selectrow_array("SELECT id FROM domain WHERE domain = $domain");
+  }
+  return $id;
+}
+
+# This function queries the valid_local_rcpt_to table to see if a non-local
+# destination email address is known good by some other server in our
+# network.  This lets us accept mail with confidence it won't bounce from
+# an invalid user address.
+sub check_local_known($$$) {
+  my $dbh = shift;
+  my $domain = '@' . shift;
+  my $username = shift;
+
+  # first check the whole recipient (this one is more likely)
+  my $id = $dbh->do("SELECT id FROM valid_local_rcpt_to WHERE rcpt_to_rev = reverse(" . $dbh->quote($username . $domain) . ")");
+  return $id if (defined $id);
+  # now check just the domain
+  $id = $dbh->do("SELECT id FROM valid_local_rcpt_to WHERE rcpt_to_rev = reverse(" . $dbh->quote($domain) . ")");
+  return $id;
+  # Note, we don't check for db failures, since this is a non-critical test
+}
+
+# This function will update the lifetime on an existing valid_local_rcpt_to record (or create a new record)
+sub update_local_known($$$) {
+  my $dbh = shift;
+  my $domain = '@' . shift;
+  my $username = shift;
+  
+
+}
 
 #############################################################################
 #
@@ -463,7 +542,7 @@ sub eom_callback
   }
 
   # Only if we have some rowids, do we update the count of passed messages
-  if ($rowids > 0) {
+  if (substr($rowids, 0, 1) ne '0') {
     # split up the rowids and update each in turn
     my @rowids = split(",", $rowids);
     foreach my $rowid (@rowids) {
@@ -536,7 +615,7 @@ sub abort_callback
 
   # only increment the aborted_count if have some rowids 
   #   (this means we didn't expect/cause an abort, but something else did)
-  if ($rowids > 0) {
+  if (substr($rowids, 0, 1) ne '0') {
     # Ok, we need to update the db, so get a handle
     my $dbh = db_connect(0) or goto DB_FAILURE;
   
@@ -695,8 +774,12 @@ sub envrcpt_callback
     $relay_ip = $3;
     $relay_maybe_forged = (length($4) > 0 ? 1 : 0);
   }
-  my $helo_name_reversed = reverse($helo_name);
-  my $relay_name_reversed = reverse($relay_name);
+  my $helo_name_reversed;
+  my $relay_name_reversed;
+
+  # We do it this way so the reversed strings are undef if empty so get nulls in the db
+  $helo_name_reversed = reverse($helo_name) if ($helo_name ne "");
+  $relay_name_reversed = reverse($relay_name) if ($relay_name ne "");
         
   # Collect the rest of the info for our checks
   my $mail_mailer = $ctx->getsymval("{mail_mailer}");
@@ -711,12 +794,6 @@ sub envrcpt_callback
   # Sendmail seems to sometimes not pass the {if_addr} if the relay_ip is localhost, so fix that
   $ifaddr = $relay_ip if (!defined $ifaddr and $relay_ip eq "127.0.0.1");
 
-  # Increment the attempted recipient count for this mail client
-  if ($enable_relay_name_updates) {
-    # Don't care if the update fails.
-    $dbh->do("UPDATE relaystats SET rcpt_attempts = rcpt_attempts + 1 WHERE relay_ip = '$relay_ip'");
-  }
-
   if ($verbose) {
     print "  Relay: $tmp - If_Addr: $ifaddr\n";
     print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - PossiblyForged: $relay_maybe_forged\n";
@@ -724,10 +801,17 @@ sub envrcpt_callback
     print "  InMailer: $mail_mailer - OutMailer: $rcpt_mailer - QueueID: $queue_id\n";
   }
 
+  # Increment the attempted recipient count for this mail client
+  if ($enable_relay_name_updates) {
+    # Don't care if the update fails.
+    $dbh->do("UPDATE relaystats SET rcpt_attempts = rcpt_attempts + 1 WHERE relay_ip = '$relay_ip'");
+  }
+
 
   # Store and maintain the dns_name of the relay if we have one
   #   Not strictly necessary, but useful for reporting/troubleshooting/analysis
   if ($enable_relay_name_updates) {
+    my $helo_ip;
     my $status_flags = 0;
 
     my $helo_mismatch = 1;
@@ -741,12 +825,15 @@ sub envrcpt_callback
         $status_flags |= HELO_INVALID if ($1 > 255 or $2 > 255 or $3 > 255 or $4 > 255);
       }
       # Here we consider names invalid if:
-      #  - All subdomain parts do not start with an alpha character
+      #  - All subdomain parts do not start with an alphanum character
       #  - They have dashes or underscores as the first or last char of a subdomain part
       #  - The rightmost domain part is not fully alpha only or is less than 2 characters
       #  - Contain any characters other than alphanumerics plus dash, underscore, and dot
       #  - Do not contain at least 2 domain parts
-      elsif ($helo_name !~ /\A(([a-zA-Z]+|[a-zA-Z0-9]+[\w\-]+[a-zA-Z0-9]+)\.)+[a-zA-Z][a-zA-Z]+\Z/) {
+      # We exclude mail on a local interface from the invalid check, since localhost is often used, and it
+      #   doesn't contain 2 parts.
+      elsif ($helo_name !~ /\A(([a-zA-Z0-9]+|[a-zA-Z0-9]+[\w\-]+[a-zA-Z0-9]+)\.)+[a-zA-Z][a-zA-Z]+\Z/
+        and $ifaddr ne $relay_ip) {
         $status_flags |= HELO_INVALID;
       }
 
@@ -758,7 +845,7 @@ sub envrcpt_callback
 
         # The helo is considered a mismatch if a helo was supplied and a dns lookup succeeded and the names
         #   do not match at least the last two domain parts.  A strong indicator of spam, but not guaranteed.
-        if ($helo_name ne $relay_ip and length($relay_name)) {
+        if ($helo_name ne $relay_ip and length($relay_name) and $ifaddr ne $relay_ip) {
           # check if the dns name is similar to the helo name
           my @dns_parts = split('\.', $relay_name);
           my @helo_parts = split('\.', $helo_name);
@@ -766,6 +853,22 @@ sub envrcpt_callback
           if (lc(pop @dns_parts) ne lc(pop @helo_parts) or lc(pop @dns_parts) ne lc(pop @helo_parts)) {
             $status_flags |= HELO_MISMATCH;
           }
+        }
+
+        # The helo name should be resolveable, and should match the source ip
+        my $tstr;
+        ($tstr, $tstr, $tstr, $tstr, my @addrs) = gethostbyname($helo_name);
+        if (scalar(@addrs) < 1) {
+          $status_flags |= HELO_DNS_FAIL;
+        }
+        else {
+          foreach my $ip (@addrs) {
+            $helo_ip = inet_ntoa($ip);
+            #print "Helo IP: $helo_ip\n" if ($verbose);
+            last if ($helo_ip eq $relay_ip);
+          }
+          # Don't flag a mismatch if is on a local interface
+          $status_flags |= HELO_IP_MISMATCH if ($helo_ip ne $relay_ip and $ifaddr ne $relay_ip);
         }
       }
     }
@@ -779,19 +882,22 @@ sub envrcpt_callback
       $tstr .= "HELO_INVALID " if $status_flags & HELO_INVALID;
       $tstr .= "HELO_MISMATCH " if $status_flags & HELO_MISMATCH;
       $tstr .= "HELO_FORGED " if $status_flags & HELO_FORGED;
+      $tstr .= "HELO_DNS_FAIL " if $status_flags & HELO_DNS_FAIL;
+      $tstr .= "HELO_IP_MISMATCH " if $status_flags & HELO_IP_MISMATCH;
       print "  Flags: $tstr\n";
     }
 
     # We insert mail_count,rcpt_count = 1 because if the record didn't exist, it didn't get incremented earlier
-    my $rows = $dbh->do("INSERT IGNORE INTO relaystats (relay_ip,relay_name,helo_name,status_flags,mail_attempts,rcpt_attempts) "
+    my $rows = $dbh->do("INSERT IGNORE INTO relaystats (relay_ip,relay_name,helo_name,helo_ip,status_flags,mail_attempts,rcpt_attempts) "
       . " VALUES ('$relay_ip'," . $dbh->quote($relay_name_reversed) . "," . $dbh->quote($helo_name_reversed) 
-      . ", $status_flags, 1, 1)");
+      . ", " . $dbh->quote($helo_ip) . ", $status_flags, 1, 1)");
     goto DB_FAILURE if (!defined($rows));
     if ($rows != 1) {
       # Row already exists, so make sure the row is updated with all the latest info
-      my $rows = $dbh->do("UPDATE relaystats SET relay_name = " . $dbh->quote($relay_name_reversed)
-        . ", helo_name = " . $dbh->quote($helo_name_reversed) . ", status_flags = $status_flags"
-        . " WHERE relay_ip = '$relay_ip'");
+      my $query = "UPDATE relaystats SET relay_name = " . $dbh->quote($relay_name_reversed)
+        . ", helo_name = " . $dbh->quote($helo_name_reversed) . ", status_flags = $status_flags ";
+      $query .= ", helo_ip = " . $dbh->quote($helo_ip) if (defined $helo_ip);
+      my $rows = $dbh->do($query . " WHERE relay_ip = '$relay_ip'");
       goto DB_FAILURE if (!defined($rows));
     }
   }
@@ -934,7 +1040,7 @@ sub envrcpt_callback
     }
     my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
       .         "  WHERE record_expires > NOW() "
-      .         "    AND relay_ip  IS NULL "
+      .         "    AND relay_ip IS NULL "
       .         "    AND rcpt_to IS NULL "
       .         "    AND ($subquery) "
       .         "  ORDER BY length(mail_from) DESC";
@@ -996,7 +1102,8 @@ sub envrcpt_callback
   # As strange as it seems, we do not want to bypass the checks if the value is OK or SKIP.
   # Only do the access.db checks if the var holding the file name has been defined
   if (defined $sendmail_accessdb_file) {
-    if (tie (my %accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+    #if (tie (my %accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+    if (tie (my %accessdb, 'BerkeleyDB::Hash', -Filename => $sendmail_accessdb_file, -Flags => DB_RDONLY)) {
       # Tie was successful, now check all the variations of entries we care about
       my $bypass_checks = 0;
       my $lhs;
@@ -1177,6 +1284,12 @@ sub envrcpt_callback
   # Disabled again.  For some reason, this causes aol to retry deliveries over and over with no delay.
   #   So much for giving a more informative x.x.x code.
   #$ctx->setreply("450", "4.3.2", "Please try again later (TEMPFAIL)");
+  
+  # Tarpit them for a while
+  if ($rcpt_to_tarpit_secs > 0) {
+    print "  Tarpitting sender connection for $rcpt_to_tarpit_secs seconds...\n";
+    sleep ($rcpt_to_tarpit_secs);
+  }
  
   # Issue a temporary failure for this message.  Connection may or may not continue.
   return SMFIS_TEMPFAIL;
@@ -1188,6 +1301,7 @@ sub envrcpt_callback
   $privdata = "0";
   $ctx->setpriv(\$privdata);
   # Indicate the message should be aborted (want a custom error code?)
+  #$ctx->setreply("571", "5.7.1", "Access denied.  Further delivery attempts will be considered hacking");
   return SMFIS_REJECT;
 
 
@@ -1221,7 +1335,7 @@ sub envrcpt_callback
     #   recipients, and we need it for logging.
     # The format of the privdata is one or more rowids seperated by commas, followed by 
     #   a null, and the envelope from.
-    if ($rowids > 0) {
+    if (substr($rowids, 0, 1) ne '0') {
        $rowids .= ",$rowid";
     } else {
       $rowids = $rowid;  
@@ -1319,8 +1433,10 @@ BEGIN:
   if (defined $sendmail_accessdb_file) {
     my %accessdb;
     # Test that we can open the accessdb file
-    if (! tie (%accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
-      die "ERROR: Unable to open access.db file '$sendmail_accessdb_file': $!";
+    #if (! tie (%accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+    if (! tie (%accessdb, 'BerkeleyDB::Hash', -Filename => $sendmail_accessdb_file, -Flags => DB_RDONLY)) {
+      #die "ERROR: Unable to open access.db file '$sendmail_accessdb_file': $!";
+      die "ERROR: Unable to open access.db file '$sendmail_accessdb_file': $! $BerkeleyDB::Error";
     }
     untie %accessdb;
   }
