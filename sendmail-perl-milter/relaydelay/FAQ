@@ -1,7 +1,9 @@
 
 Frequently Asked Questions:
 
-(This list will be added to as more are discovered)
+  (This list will be added to as more are discovered)
+
+Installation Questions:
 
 Q. Why am I getting a "Inappropriate ioctl for device" error when trying to
    configure the milter to use sendmail's access db?
@@ -18,10 +20,15 @@ Q. I've customized my sendmail to use special mailers in certain cases.
    checks."
 
 A. If you are using customized (or custom named) mailers in your sendmail
-   config, then you will need to modify the milter source to include the
-   names of these special mailers in the checks.  By default, only mail
-   received with the "*smtp"  and "local" mailers is checked.  Add the 
-   name of your mailer to the checks on $mail_mailer.
+   config, then you probably want to set $force_all_mailer_checks, or those
+   mailers will be considered "special" and will bypass the greylisting 
+   checks.  By default, only mail received with the "*smtp"  and "local" 
+   mailers is checked.
+   
+   If you have some custom mailers that need to be checked and some custom
+   mailers that shouldn't be checked, then you will need to modify the milter 
+   source to include the names of these special mailers in the checks.
+   Just add the name of your mailer to the checks on $mail_mailer.
 
 
 Q. When trying to run the milter, I'm getting errors like "Attempt to free 
@@ -44,4 +51,24 @@ A. PMilter seems to have a bug regarding not preserving macro info from
 
    define(`confMILTER_MACROS_ENVRCPT', confMILTER_MACROS_ENVRCPT``, {i}, {auth_type}, {auth_authen}, {auth_ssf}, {auth_author}, {mail_mailer},{mail_host}, {mail_addr}, {if_addr},  {_}'')dnl
 
+
+Operational Questions:
+
+Q. How do I make sure that mail from certain sources or to certain addresses 
+   is never delayed?
+
+A. Put whitelisting records in the db.  The xlist.pl script is provided to
+   make this easier.  Almost always, you will want to whitelist servers, and
+   to do that, simply put a whitelist record with their ip address in the db.
+   If you have a special account or class of users where low latency of email 
+   is more important than spam protection, then add a "to" whitelist.
+   NEVER (really, I mean NEVER) whitelist on the from address.  You may want
+   to blacklist on the from, but never whitelist, since it is easily forged.
+   Run xlist.pl with no arguments to see some example use info.
+
+   An alternate way of whitelisting is to put appropriate records in the 
+   sendmail access db (if you've configured the milter to support it).  
+   While the access db is a perfectly acceptable way of doing it, you will 
+   lose the tracking information that gets stored if the whitelist info
+   is in the db, which may be useful to you later.
 

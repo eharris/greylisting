@@ -133,7 +133,14 @@ sub usage {
   print "Usage:\n"
     .   "  $0 <black|white> <ip|from|to> <fromaddr|ip|network>\n\n"
     .   "Note: networks must be specified in incomplete form, i.e. 10.2 = 10.2.0.0/16\n"
-    .   "\n";
+    .   "  NEVER whitelist on the 'from' address, since it is easily forged.\n\n"
+    .   "Examples:\n\n"
+    .   "$0 white ip 10\n"
+    .   "  -- Whitelist all mail from systems on the private 10.x.x.x network\n"
+    .   "$0 white to sales\@somedomain.com\n"
+    .   "  -- Whitelist mail sent to the sales address to avoid possible delays\n"
+    .   "$0 black from aspamdomain.com\n"
+    .   "  -- Blacklist all mail with a from address at aspamdomain.com\n";
   exit;
 }
 
