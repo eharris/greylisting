@@ -1,0 +1,62 @@
+
+# This is a list of manual whitelist entries that have been discovered
+# so far for various reasons.
+
+# This is not meant to be a comprehensive list of all servers that should be 
+# considered legitimate, merely a list of servers that for one reason or 
+# another may either have some type of problem with the Greylisting method, 
+# or because of a recognized need to avoid the delay that it may cause.
+
+# These are common entries that most people using greylisting will probably 
+# want to have.  If you happen to discover ones that aren't in this list, 
+# or that the IP's in this list have changed, please let me know at 
+# eharris@puremagic.com.
+
+# Here's an example command to use in a mysql shell to insert 
+#   a whitelist entry (assumes defaults from dbdef.sql):
+# INSERT INTO relaytofrom (relay_ip, record_expires, create_time) 
+#   VALUES ('127.0.0.1', '9999-12-31 23:59:59', NOW());
+
+127.0.0.1       # Of course we don't want to delay ourselves or local users
+192.168         # Don't delay our private networks either
+10              # Private net (class A)
+172.16.0        # Another private net (inidividual entries, since can't
+172.16.1        #   do a /12 netmask easily
+172.16.2
+172.16.3
+172.16.4
+172.16.5
+172.16.6
+172.16.7
+172.16.8
+172.16.9
+172.16.10
+172.16.11
+172.16.12
+172.16.13
+172.16.14
+172.16.15
+
+# Public Servers
+
+12.5.136.141    # Southwest Airlines (unique sender, no retry)
+12.5.136.142    # Southwest Airlines
+64.12.136       # AOL (common pool)
+64.12.137       # AOL
+64.12.138       # AOL
+66.135.209      # Ebay (for time critical alerts)
+66.135.197      # Ebay
+66.218.66       # Yahoo Groups servers (common pool, no retry)
+152.163.225     # AOL
+204.107.120.10  # Ameritrade (no retry)
+205.188.156     # AOL
+205.206.231     # SecurityFocus.com (unique sender per attempt)
+207.171.168     # Amazon.com
+207.171.180     # Amazon.com
+207.171.187     # Amazon.com
+207.171.188     # Amazon.com
+207.171.190     # Amazon.com
+213.136.52.31   # Mysql.com (unique sender)
+217.158.50.178  # AXKit mailing list (unique sender per attempt)
+
+
