@@ -64,6 +64,16 @@ my $database_port = 3306;
 my $database_user = 'db_user';
 my $database_pass = 'db_pass';
 
+
+# Set this to something nonzero to limit the number of children that the 
+#   milter will spawn.  Since children are never recycled (there seems 
+#   to be a problem doing that with Sendmail::Milter), threads,
+#   once created, will exist until the milter is shutdown.  Each thread
+#   also consumes a database connection, so limiting db connections and
+#   memory footprint are both good reasons to set this.
+# Setting to zero makes the number of threads unlimited.
+my $maximum_milter_threads = 40;
+
 # This determines how many seconds we will block inbound mail that is
 #   from a previously unknown [ip,from,to] triplet.  If it is set to
 #   zero, incoming mail associations will be learned, but no deliveries
@@ -969,8 +979,8 @@ BEGIN:
   print "Starting Sendmail::Milter $Sendmail::Milter::VERSION engine.\n";
 
   # Parameters to main are max num of interpreters, num requests to service before recycling threads
-  #if (Sendmail::Milter::main(10, 30)) {
-  if (Sendmail::Milter::main(10, 0)) {
+  # We don't set it to recycle children, as that seems to cause coredumps.
+  if (Sendmail::Milter::main($maximum_milter_threads, 0)) {
     print "Successful exit from the Sendmail::Milter engine.\n";
   }
   else {
