@@ -11,4 +11,25 @@ A. This is most likely an incompatibility between the Berkeley DB libraries
    sendmail's makemap program was compiled with.  Make sure that the 
    libraries/versions match, or disable the access db checking.
 
-   
+
+Q. I've customized my sendmail to use special mailers in certain cases.
+   But any mail received by these mailers are bypassing the checks with
+   this message: "Mail delivery is not using an smtp-like mailer.  Skipping 
+   checks."
+
+A. If you are using customized (or custom named) mailers in your sendmail
+   config, then you will need to modify the milter source to include the
+   names of these special mailers in the checks.  By default, only mail
+   received with the "*smtp"  and "local" mailers is checked.  Add the 
+   name of your mailer to the checks on $mail_mailer.
+
+
+Q. When trying to run the milter, I'm getting errors like "Attempt to free 
+   unreferenced scalar".
+
+A. Several versions of Redhat and Suse shipped with non-threadsafe versions
+   of the perl mysql modules.  Try upgrading to the most uptodate versions
+   of the DBD mysql modules for your distrobution, or use the ones from 
+   CPAN.
+
+
