@@ -652,10 +652,10 @@ sfsistat abort_callback(SMFICTX *ctx)
 	smfi_setpriv(ctx,0);
 
 	writelog(2,"IN abort CALLBACK - PrivData: %s \n", privdata_ref);
-
-	strcpy(buf1,privdata_ref);
+	buf1[0] = 0;
 	if( privdata_ref )
 	{
+		strcpy(buf1,privdata_ref);
 		free(privdata_ref);
 		privdata_ref = 0;
 	}
