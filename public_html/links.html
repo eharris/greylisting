@@ -94,7 +94,17 @@ that uses Greylisting as a secondary technique for inconclusive call-backs.  Det
 
 <p>
 Martin Dempsey has developed a Greylisting implementation for Exim 4.x.  It is available at 
-<a href="http://www.digitaleveryware.com/projects/greylisting/">http://www.digitaleveryware.com/projects/greylisting/</a>.
+<a href="http://www.digitaleveryware.com/projects/greylisting/">http://www.digitaleveryware.com/projects/greylisting/</a>
+</p>
+
+<p>
+
+William Blunn has developed an implementation in C++ using a MySQL database backend.  
+It was developed for use with Exim 4 using an ACL rule rather than local_scan() and therefore works with the 
+vanilla build of Exim 4 and does not require any special patches or extensions.  But since it is implemented 
+as a freestanding executable, it should be able to be used with any MTA that supports calling out to an external program. 
+The implementation also includes outgoing message processing. See:
+<a href="http://sourceforge.net/projects/bagley/">http://sourceforge.net/projects/bagley/</a>
 </p>
 
 <p>
@@ -250,6 +260,10 @@ Commercial products incorporating varying forms of the greylisting method are st
 
 <p>
 <a href="http://www.AutumnTECH.com/">AutumnTECH E-Mail Appliances</a>
+</p>
+
+<p>
+<a href="http://www.aloaha.com/">Aloaha E-Mail Software</a>
 </p>
 
 <hr>
