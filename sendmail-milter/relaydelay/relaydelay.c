@@ -594,6 +594,12 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 
 		writelog(2,"   mail_mailer: %s\n", mail_mailer);
 
+		if( strlen(mail_from) > 254 )
+		{
+			smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: Way, way, way too long. Buffer Overflow Exploit Attempt?");
+			return SMFIS_REJECT;
+		}
+		
 		strncpy(mail_from_buf, mail_from, SAFESIZ);
 		mail_from_buf[SAFESIZ] = 0;
 
@@ -995,7 +1001,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	char *tmp, relay_ip[1000], relay_name[1000], relay_ident[1000], relay_maybe_forged[1000];
 	char relay_ip_parts[4][20];
 	char relay_name_parts[40][100], rcpt_domain_parts[40][100];
-	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id, *if_addr;
+	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id, *if_addr, *authen, *authtype;
 	char *rcpt_to2[BUFSIZE], *tstr;
 	char rcpt_domain[BUFSIZE], rcpt_acct[BUFSIZE],*r2;
 	char from_domain[BUFSIZE], from_acct[BUFSIZE];
@@ -1121,6 +1127,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	rcpt_mailer = smfi_getsymval(ctx,"{rcpt_mailer}");
 	recipient = smfi_getsymval(ctx,"{rcpt_addr}");
 	queue_id = smfi_getsymval(ctx,"{i}");
+	authen = smfi_getsymval(ctx,"{auth_authen}");
+	authtype = smfi_getsymval(ctx,"{auth_type}");
 	if_addr = smfi_getsymval(ctx,"{if_addr}");
 	
 	strcpy(relay_ip_parts[0], relay_ip);
@@ -1196,6 +1204,9 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		/* we aren't using an smtp-like mailer, so bypass checks */
 		writelog(1,"  Mail delivery is not using an smtp-like mailer (%s). (from=%s)  Skipping checks.\n",
 				 mail_mailer, mail_from);
+		if( reverse_mail_tracking && strcasecmp(rcpt_mailer,"local") != 0 )
+			reverse_track(mail_from, rcpt_to);
+		
 		goto PASS_MAIL;
 	}
 
@@ -1211,6 +1222,15 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 					 mail_mailer, relay_ip);
 		goto PASS_MAIL;
 	}
+	if( authen && authen[0] )
+	{
+		writelog(1,"  AuthType: %s - Credentials: %s\n", authtype, authen);
+		writelog(1,"  Mail delivery is authenticated.  Skipping checks.\n");
+		if( reverse_mail_tracking && strcasecmp(rcpt_mailer,"local") != 0 )
+			reverse_track(mail_from, rcpt_to);
+		goto PASS_MAIL;
+	}
+	
 
 	/*
 	  # Check for local IP relay whitelisting from the sendmail access file
@@ -1342,18 +1362,14 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		MYSQL_ROW row;
 		int i;
 
-		strcpy(buf2,relay_ip);
 		subquery[0] = 0;
 		for(i=0; i<check_wildcard_relay_ip; i++)
 		{
 			if( subquery[0] )
 				strcat(subquery," OR ");
 			strcat(subquery,"relay_ip = '");
-			strcat(subquery,buf2);
+			strcat(subquery,relay_ip_parts[i]);
 			strcat(subquery,"'");
-			p2 = strrchr(buf2,'.');
-			if(p2)
-				*p2 = 0;
 		}
 		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom \
 WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (%s) ORDER BY length(relay_ip) DESC", 
@@ -1408,25 +1424,20 @@ WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (
 		subquery[0] = 0;
 		while( i++ < check_wildcard_rcpt_to)
 		{
+			if( rcpt_domain_parts[i-1][0] == 0 )
+				break;
+			
 			if( subquery[0] )
 				strcat(subquery," OR )");
-			strcat(subquery,"rcpt_to = '<");			
+			strcat(subquery,"rcpt_to = '<");
 
 			if( rcpt_acct[0] )
 			{
 				strcat(subquery,rcpt_acct);
 				strcat(subquery,"@");
 			}
-			strcat(subquery,buf2);
+			strcat(subquery,rcpt_domain_parts[i-1]);
 			strcat(subquery,">'");
-			p2 = strchr(buf2,'.');
-			if(p2)
-			{
-				strcpy(buf3,p2+1);
-				strcpy(buf2,buf3);
-			}
-			else 
-				break;
 		}
 		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom \
 WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND (%s) ORDER BY length(rcpt_to) DESC", 
