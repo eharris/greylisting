@@ -3,6 +3,33 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2004-05-22 - Included two little utilities to do simple queries on the db
+    and easily add white/blacklist entries.
+
+  2004-05-14 - A few corrections for the use of the $verbose flag.  Added a 
+    suggested modification to make db_connect discover db problems faster, but 
+    left it commented out because it causes alot of latency if the db isn't 
+    local.
+
+  2004-05-13 - Integrated a patch from Martin A. Walker <maw@synesis.net> 
+    to allow logging to a logfile and running as a daemon.
+    Changed the accessdb checks to use BerkeleyDB module instead of DB_File, 
+    as it appears to be more compatible with the db versions sendmail uses on 
+    more distributions.  Left lines in source but commented out for using 
+    DB_File.  In case anyone needs to, they can revert to using DB_File easily.
+    Added a check to verify that the dns_name table exists if name updates are
+    enabled.
+
+  2004-05-12 - Rewrote the db_maintenance.pl script so that it now segments 
+    the work into sizeable chunks that keep it from keeping the db tables 
+    locked for excessive periods of time.
+
+  2003-10-28 - Fixed cosmetic problem.
+
+  2003-08-11 - Attempted to fix a reported milter issue with privdata.
+
+  2003-08-11 - Fixed some non-numeric warnings.
+
   2003-07-23 - Added checks to allow manual blacklisting within the greylist 
     db based on mail_from address/domain.  Also added some extra info to 
     a few debugging messages.
