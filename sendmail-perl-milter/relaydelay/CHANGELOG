@@ -3,6 +3,9 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2003-07-22 - Cleaned up a small mite in the reverse_track function.  It
+    probably won't cause anyone trouble, but fixed anyway.
+
 0.04 - Release
 
   2003-07-21 - Fixed a pretty serious bug if the config option 

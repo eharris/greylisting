@@ -521,7 +521,7 @@ sub reverse_track($$$)
   # If got here, then need to create a reverse record
   $sth = $dbh->prepare("INSERT INTO relaytofrom "
     . " (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) "
-    . " VALUES (NULL,?,?,NOW(),NOW() + INTERVAL $reverse_mail_life_secs SECOND,'AUTO',NOW())") or goto DB_FAILURE;
+    . " VALUES (NULL,?,?,NOW(),NOW() + INTERVAL $reverse_mail_life_secs SECOND,'AUTO',NOW())");
   # Note the reversed from and to fields! 
   $sth->execute($rcpt_to, $mail_from);
   $sth->finish;
