@@ -1,0 +1,47 @@
+
+# This is a list of manual blacklist entries that have been discovered
+# so far as definite spammer networks with no redeeming qualities.
+
+# Entries on this list are spammers by my own judgement.  If you don't trust
+# my judgement, don't use this list.
+
+# I maintain this list for use as blacklist entries in the greylisting
+# database.  I do not use it to block hosts via the sendmail access file
+# since that would not allow the greylisting code to collect delivery 
+# attempts and other statistics on these hosts.
+
+# Most of the entries in this list were added because for some reason they
+# exhibited the determination to get around greylisting.  Since many are
+# also on other dns blacklists, you should be able to get more complete
+# blocking by using those other blacklists.
+
+# Here's an example command to use in a mysql shell to insert 
+#   a whitelist entry (assumes defaults from dbdef.sql):
+# INSERT INTO relaytofrom (block_expires, record_expires, create_time, relay_ip) 
+#   VALUES (NOW() + INTERVAL 1 YEAR, NOW() + INTERVAL 1 YEAR, NOW(), '0.0.0.0');
+# or to make them permanent use: '9999-12-31 23:59:59'
+
+64.253.204
+65.54.169
+65.214.161
+146.82.220
+157.151.48
+157.151.49
+157.151.50
+157.151.51
+157.151.52
+157.151.53
+157.151.54
+157.151.55
+200.42.0
+205.235.69
+205.235.70
+207.178.175
+207.178.180
+207.178.197
+207.178.202
+209.226.175
+216.109.84
+216.244.192
+
+
