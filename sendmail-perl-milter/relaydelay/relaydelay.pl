@@ -834,8 +834,9 @@ sub envrcpt_callback
     #   Makes sure that only one (or a couple, small race) of these gets by per delay.
     if ($mail_from eq "<>") {
       # Only update the lifetime of records if they are AUTO, wouldn't want to do wildcard records
-      $dbh->do("UPDATE relaytofrom SET record_expires = NOW() WHERE id = $rowid AND origin_type = 'AUTO'") or goto DB_FAILURE;
-      print "  Mail is from null-sender.  Updated it to end its life.\n" if ($verbose);
+      my $rows = $dbh->do("UPDATE relaytofrom SET record_expires = NOW() "
+        . " WHERE id = $rowid AND origin_type = 'AUTO'") or goto DB_FAILURE;
+      print "  Mail is from null-sender.  Updated it to end its life.\n" if ($verbose and $rows > 0);
     }
 
     # Since we have a rowid, then set the context data to indicate we successfully 
