@@ -674,6 +674,8 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 {
 	char *mail_from = argv[0];
 	char mail_from_buf[BUFSIZE];
+	char mail_from_buf2[BUFSIZE];
+	char mail_from_buf3[BUFSIZE]; /* mail_from with the <> stripped out */
 	char *privdata, buf[BUFSIZE];
 
 	writelog(2,"envfrom Callback:\n");
@@ -687,7 +689,7 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 		if( strlen(mail_from) > 254 )
 		{
 			smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: Way, way, way too long. Buffer Overflow Exploit Attempt?");
-			writelog(1,"Rejecting letter with excessively long mail_from length (%d)", strlen(mail_from));
+			writelog(1,"Rejecting letter with excessively long mail_from length (%d)\n", strlen(mail_from));
 			return SMFIS_REJECT;
 		}
 		
@@ -718,31 +720,23 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 			 */
 			regex_t preg;
 			regmatch_t pmatch[20];
-			char mail_from_buf2[BUFSIZE], *at, *p1, secure_version[BUFSIZE*4];
+			char *at, *p1, secure_version[BUFSIZE*4];
 			int errcode;
 			static pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
 			static pthread_mutex_t mut2 = PTHREAD_MUTEX_INITIALIZER;
 
 			
-			writelog(3,"   Mutex Locking...\n");
-			pthread_mutex_lock(&mut);
 			writelog(2,"   mail_from: %s\n", mail_from);
-			if( do_regex("^<(.*)>$", mail_from, &preg, pmatch, 0) == 0 )
+			if( mail_from_buf[0] == '<' && mail_from_buf[strlen(mail_from_buf)-1] == '>' )
 			{
-				if( pmatch[1].rm_so != -1 && pmatch[1].rm_eo != -1 )
-				{
-					strncpy(mail_from_buf, mail_from+pmatch[1].rm_so, pmatch[1].rm_eo-pmatch[1].rm_so);
-					mail_from_buf[pmatch[1].rm_eo-pmatch[1].rm_so] = 0;
-					mail_from = mail_from_buf;
-				}
-				regfree(&preg);
+				strcpy(mail_from_buf3,mail_from_buf+1);
+				mail_from_buf3[strlen(mail_from_buf3)-1] = 0;
+				mail_from = mail_from_buf3;
 			}
-			writelog(3,"   Mutex UnLocking...\n");
-			pthread_mutex_unlock(&mut);
 			if( strpbrk(mail_from, " \t\n\r\f") )
 			{
 				smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: contains whitespace");
-				writelog(1,"Rejecting letter with from address that contains whitespace (%s)", securely_filter(mail_from,secure_version));
+				writelog(1,"Rejecting letter with from address that contains whitespace (%s)\n", securely_filter(mail_from,secure_version));
 				return SMFIS_REJECT;
 			}
 			/* Check for embedded brackets, parens, quotes,
@@ -750,7 +744,7 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 			if( strpbrk(mail_from, "<>[]{}()'\"`/\\|") )
 			{
 				smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: invalid punctuation characters");
-				writelog(1,"Rejecting letter with from address that contains invalid punctuation chars (%s)", securely_filter(mail_from,secure_version));
+				writelog(1,"Rejecting letter with from address that contains invalid punctuation chars (%s)\n", securely_filter(mail_from,secure_version));
 				return SMFIS_REJECT;
 			}
 			p1 = mail_from;
@@ -759,7 +753,7 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 				if( *p1 < 33 || *p1 > 126 )
 				{
 					smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: contains invalid characters");
-					writelog(1,"Rejecting letter with from address that contains invalid characters (%s)", securely_filter(mail_from,secure_version));
+					writelog(1,"Rejecting letter with from address that contains invalid characters (%s)\n", securely_filter(mail_from,secure_version));
 					return SMFIS_REJECT;
 				}
 				p1++;
@@ -768,7 +762,8 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 			if( strlen(mail_from) > 0 )
 			{
 				char *from_acct, *from_domain;
-				strncpy(mail_from_buf2, mail_from, SAFESIZ);
+				if( mail_from_buf2 != mail_from )
+					strncpy(mail_from_buf2, mail_from, SAFESIZ);
 				mail_from_buf2[SAFESIZ] = 0;
 
 				at = strchr(mail_from_buf2,'@');
@@ -780,19 +775,19 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 					if( strlen(from_acct)==0 )
 					{
 						smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: user part empty");
-						writelog(1,"Rejecting letter with from address with no user part (%s)", securely_filter(mail_from,secure_version));
+						writelog(1,"Rejecting letter with from address with no user part (%s)\n", securely_filter(mail_from,secure_version));
 						return SMFIS_REJECT;
 					}
 					if( strlen(from_domain)==0 )
 					{
 						smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: domain part empty");
-						writelog(1,"Rejecting letter with from address with empty domain (%s)", securely_filter(mail_from,secure_version));
+						writelog(1,"Rejecting letter with from address with empty domain (%s)\n", securely_filter(mail_from,secure_version));
 						return SMFIS_REJECT;
 					}
 					if( strchr(from_domain,'@') )
 					{
 						smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: too many at signs");
-						writelog(1,"Rejecting letter with from address with too many at signs (%s)", securely_filter(mail_from,secure_version));
+						writelog(1,"Rejecting letter with from address with too many at signs (%s)\n", securely_filter(mail_from,secure_version));
 						return SMFIS_REJECT;
 					}
 					writelog(3,"   Mutex Locking...\n");
@@ -803,7 +798,7 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 						if( pmatch[0].rm_so == -1 || pmatch[0].rm_eo == -1 )
 						{
 							smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: domain part invalid");
-							writelog(1,"Rejecting letter with from address with invalid domain part (%s)", securely_filter(mail_from,secure_version));
+							writelog(1,"Rejecting letter with from address with invalid domain part (%s)\n", securely_filter(mail_from,secure_version));
 							return SMFIS_REJECT;
 						}
 					}
@@ -1131,7 +1126,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		if( strlen(rcpt_to) > 254 )
 		{
 			smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope To: address: Way, way, way too long. Buffer Overflow Exploit Attempt?");
-			writelog(1,"Rejecting letter whose To: address is excessively long (%s)", securely_filter(rcpt_to,secure_version));
+			writelog(1,"Rejecting letter whose To: address is excessively long (%s)\n", securely_filter(rcpt_to,secure_version));
 			return SMFIS_REJECT;
 		}
 	}
@@ -1922,7 +1917,7 @@ WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'",
 
 	/* Indicate the message should be aborted (want a custom error code?) */
 	smfi_setreply(ctx, "553", "5.3.0", "You really got someone quite upset at this site: you won't be able to deliver mail here any more. Go Away!");
-	writelog(1,"Rejecting letter via BOUNCE mechanism (%s)", securely_filter(mail_from,secure_version));
+	writelog(1,"Rejecting letter via BOUNCE mechanism (%s)\n", securely_filter(mail_from,secure_version));
 	return SMFIS_REJECT;
 
 	PASS_MAIL:
