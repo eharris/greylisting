@@ -3,6 +3,12 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+0.04 - Release
+
+  2003-07-21 - Fixed a pretty serious bug if the config option 
+    $tempfail_messages_after_data_phase was enabled.  Please do not use 
+    version 0.03 for this reason.
+
 0.03 - Release
 
   2003-07-19 - A few cosmetic changes and comment updates.
