@@ -3,12 +3,24 @@
 # Database definitions
 #######################################################################
 
+#############################################################################
+## Note: Feed this into mysql, while logged in as mysql root user. You can
+##       use the source command. PLEASE EDIT THIS FILE FIRST!
+##
+## NOTE: DO NOT just feed this data into mysql unedited! The white/black list 
+##   stuff needs to edited or you will have problems! Change the name/password 
+##   for the milter user milter below or suffer the security consequences!
+#############################################################################
+
 # Using Mysql 3.23.2 or later (required for NULLs allowed in indexed fields)
+
+# If you want to clear your database and start from scratch, do a drop, like so
+#DROP DATABASE relaydelay;
 
 CREATE DATABASE relaydelay;
 
 # Use something like this to create a user that can use the relaydelay database (change for your login info)
-grant select,insert,update,delete on relaydelay.* to db_user@'localhost' identified by 'db_pass';
+#grant select,insert,update,delete on relaydelay.* to db_user@'localhost' identified by 'db_pass';
 
 # Use something like this to remove a user from the db
 #revoke all on relaydelay.* from db_user@'localhost';
