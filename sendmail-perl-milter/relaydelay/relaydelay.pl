@@ -624,6 +624,9 @@ sub envrcpt_callback
   my $authtype    = $ctx->getsymval("{auth_type}");
   my $ifaddr      = $ctx->getsymval("{if_addr}");
 
+  # Sendmail seems to sometimes not pass the {if_addr} if the relay_ip is localhost, so fix that
+  $ifaddr = $relay_ip if (!defined $ifaddr and $relay_ip eq "127.0.0.1");
+
   if ($verbose) {
     print "  Relay: $tmp - If_Addr: $ifaddr\n";
     print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - PossiblyForged: $relay_maybe_forged\n";
