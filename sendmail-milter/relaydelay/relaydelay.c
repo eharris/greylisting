@@ -1,3 +1,6 @@
+/* -#- Mode: C; c-basic-indent: 4; indent-tabs-mode: nil; -#- */
+/* vim: set expandtab shiftwidth=4 softabstop=4 tabstop=8 */
+
 #include <stdio.h>
 #include <sys/types.h>
 #include <errno.h>
@@ -127,6 +130,7 @@ int load_config(void)
 
 	if( verbose )
 		printf("Parsing %s...\n", config_file_name);
+	
 
 	relaydelay_in = fopen( config_file_name, "r");
 	if( relaydelay_in == NULL)
@@ -150,6 +154,7 @@ int load_config(void)
 		printf("  update_record_life_secs = %d\n", update_record_life_secs);
 		printf("  check_wildcard_relay_ip = %d\n", check_wildcard_relay_ip);
 		printf("  check_wildcard_rcpt_to = %d\n", check_wildcard_rcpt_to);
+		printf("  check_wildcard_mail_from = %d\n", check_wildcard_mail_from);
 		printf("  tempfail_messages_after_data_phase = %d\n", tempfail_messages_after_data_phase);
 		printf("  do_relay_lookup_by_subnet = %d\n", do_relay_lookup_by_subnet);
 		printf("  enable_relay_name_updates = %d\n", do_relay_lookup_by_subnet);
@@ -174,7 +179,7 @@ int load_config(void)
 void db_connect(void)
 {
 	if( !mysql_connected )
-	{
+    {
 		mysql_init(&global_dbh);
 		if( mysql_real_connect(
 			&global_dbh,
@@ -208,34 +213,69 @@ int db_query(char *commandbuf, MYSQL_RES **result)
 {
 	static pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
 	int res;
+	int try_count = 0;
 
 	if( verbose > 1 )
+	{
 		printf("   About to issue query: %s\n", commandbuf);
+		fflush(stdout);
+	}
+	
 
+	if( verbose > 1 )
+	{
+		printf("   Mutex Locking...\n");
+		fflush(stdout);
+	}
 	pthread_mutex_lock(&mut);
+	if( verbose > 1 )
+	{
+		printf("   Mutex Locked...\n");
+		fflush(stdout);
+	}
 
-	int try_count = 0;
 	*result = NULL;
 	do
 	{
 		db_connect();
 		if( (res = mysql_query(&global_dbh, commandbuf)) == 0 )
 		{
+			if( verbose > 1 )
+			{
+				printf("   Control returns from query:\n");
+				fflush(stdout);
+			}
 			*result = mysql_store_result(&global_dbh);
+			if( verbose > 1 )
+			{
+				printf("   Control returns from store_result:\n");
+				fflush(stdout);
+			}
 		}
 		else
 		{
 			printf("ERROR: Database Call Failed: %s\n", mysql_error(&global_dbh));
+			fflush(stdout);
 			db_disconnect();
 			++try_count;
 		}
 	}
-	while (try_count < MAX_QUERY_TRIES && *result == NULL);
+	while (try_count < MAX_QUERY_TRIES && res );
 
 	if (try_count >= MAX_QUERY_TRIES)
 		printf("ERROR: Gave up trying to communicate with mysql.\n");
 
+	if( verbose > 1 )
+	{
+		printf("   Mutex UnLocking...\n");
+		fflush(stdout);
+	}
 	pthread_mutex_unlock(&mut);
+	if( verbose > 1 )
+	{
+		printf("   Mutex UnLocked...\n");
+		fflush(stdout);
+	}
 
 	return res;
 }
@@ -453,7 +493,7 @@ int split(char sep, char *str, char ***array)
 	cnt = 0;
 	while( (p1=strchr(p,sep)) )
 	{
-		p = p1++;
+		p = ++p1;
 		cnt++;
 	}
 	cnt++;
@@ -539,10 +579,22 @@ sfsistat eom_callback(SMFICTX *ctx)
 			return SMFIS_TEMPFAIL;
 
 		}
+		if( verbose > 1 )
+			printf("About to check rowids (%s) and split...\n", rowids);
+		if( verbose )
+			fflush(stdout);
+		
+		
 		if( strlen(rowids) > 0 )
 		{
 			char **arr;
 			int i, cnt = split(',', rowids, &arr);
+
+			if( verbose > 1 )
+				printf("Split returns count (%d)...\n", cnt);
+
+			if( verbose )
+				fflush(stdout);
 
 			for( i=0; i<cnt; i++ )
 			{
@@ -606,6 +658,9 @@ sfsistat abort_callback(SMFICTX *ctx)
 	char *privdata_ref = smfi_getpriv(ctx);
 	char *rowids, *mail_from, *rcpt_to;
 	char *t1, *t2, buf1[99000];
+	char **arr;
+	int i, cnt = split(',', rowids, &arr);
+
 	/* Clear our private data on this context */
 	smfi_setpriv(ctx,0);
 
@@ -637,9 +692,6 @@ sfsistat abort_callback(SMFICTX *ctx)
 
 	if( !strlen(rowids) )
 		return SMFIS_CONTINUE;
-
-	char **arr;
-	int i, cnt = split(',', rowids, &arr);
 
 	for( i=0; i<cnt; i++ )
 	{
@@ -697,6 +749,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	char row_id[32],rowids_buf[BUFSIZE];
 	int res;
 	MYSQL_RES *result;
+	MYSQL_ROW row;
 	char buf2[BUFSIZE], *p2, buf3[BUFSIZE];
 	char *tmp, relay_ip[1000], relay_name[1000], relay_ident[1000], relay_maybe_forged[1000];
 	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id;
@@ -823,6 +876,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	{
 		char subquery[BUFSIZE];
 		char query[BUFSIZE];
+		MYSQL_ROW row;
 		int i;
 
 		strcpy(buf2,relay_ip);
@@ -856,7 +910,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			goto DB_FAILURE;
 		}
 
-		MYSQL_ROW row = mysql_fetch_row(result);
+		row = mysql_fetch_row(result);
 		if( verbose>1 )
 			printf("   fetch_row returns %x\n", row);
 
@@ -903,6 +957,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		char *p2,buf3[BUFSIZE];
 		char subquery[BUFSIZE];
 		char query[BUFSIZE];
+		MYSQL_ROW row;
 		int i=0;
 
 		if( verbose>1 ) printf("   rcpt_acct=%s, rcpt_domain=%s, rcpt_to=%s \n", rcpt_acct, rcpt_domain, rcpt_to);
@@ -945,7 +1000,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			goto DB_FAILURE;
 		}
 
-		MYSQL_ROW row = mysql_fetch_row(result);
+		row = mysql_fetch_row(result);
 		if( row && row[0] && strlen(row[0]) > 0 )
 		{
 			strncpy(row_id, row[0], sizeof(row_id));
@@ -989,6 +1044,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		char buf2[BUFSIZE],*p2,buf3[BUFSIZE];
 		char subquery[BUFSIZE];
 		char query[BUFSIZE];
+		MYSQL_ROW row;
 		int i=0;
 
 		if( verbose>1 ) printf("   from_acct=%s, from_domain=%s, mail_from=%s \n", from_acct, from_domain, mail_from);
@@ -1031,7 +1087,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			goto DB_FAILURE;
 		}
 
-		MYSQL_ROW row = mysql_fetch_row(result);
+		row = mysql_fetch_row(result);
 		if( row && row[0] && strlen(row[0]) > 0 )
 		{
 			strncpy(row_id, row[0], sizeof(row_id));
@@ -1123,7 +1179,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	if( !result )
 		goto DB_FAILURE;
 
-	MYSQL_ROW row = mysql_fetch_row(result);
+	row = mysql_fetch_row(result);
 
 	if( !mysql_num_rows(result) )
 	{
