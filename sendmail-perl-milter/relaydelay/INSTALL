@@ -1,0 +1,53 @@
+
+Prerequisites:
+
+1. Make sure you have a version of perl with threading compiled in.  I recommend
+   at least 5.8.0.  If for some reason you want to keep an older versino of perl
+   for your system, just build a new threaded perl somewhere and call it 
+   directly when starting the perl script.
+2. Make sure you have Sendmail 8.12.x with the milter interface compiled in, and 
+   the milter libraries installed.
+3. Make sure you have a functional mysql database server, I recommend later
+   subversions of 3.23.xx.  Or better yet, get 4.0.
+4. Grab Sendmail::Milter and build and install it.
+5. Make sure you have the perl DBI modules installed, plus the DBD::mysql.
+
+
+To install:
+
+1. Modify relaydelay.conf to your liking and drop it in /etc/mail,
+   or change the script $config_file to point to the location you
+   want to store it.  I suggest you make it readable only by root so local
+   users can't see the user and password for the database.
+   
+2. Configure the database using the commands in dbdef.sql.  Make sure that
+   you created the user defined in the config file, and that that user has 
+   access to login from the machine you're running sendmail and the milter on.
+   
+3. Add the milter config to your sendmail.mc and rebuild your sendmail.cf.
+   An example set of config lines is:
+
+   define(`MILTER',1)
+   INPUT_MAIL_FILTER(`myfilter', `S=local:/var/run/perl.sock, T=S:1m;R:2m;E:3m')dnl
+
+   Note that the define line is only required if it's not already in the config
+   file somewhere.  It's probably already there if you're using another milter
+   like amavis with spamassassin (which is recommended).
+
+4. Make sure the script has the execute bit set, and test the configuration by 
+   opening another window and running something similar to:
+
+   relaydelay.pl myfilter /etc/mail/sendmail.cf 
+
+   Or, if you built a threaded perl somewhere else that isn't the system 
+   installed perl, run something like:
+
+   /usr/src/perl-5.8.0/perl relaydelay.pl myfilter /etc/mail/sendmail.cf
+
+5. After you see mail being processed and entries being created correctly,
+   then you probably want to make sure $verbose is turned off, and put 
+   the startup of the script into your sendmail start script(s).
+
+
+Enjoy!
+
