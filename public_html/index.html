@@ -309,10 +309,9 @@ will succeed, and the outgoing mail should be accepted with no delay.
 One mailer that seems to have a related problem is Postfix.  Postfix breaks from the
 normal procedure of using the null sender for its callbacks, and instead uses a 
 configurable sender address in the callback.  I tried to get an explanation as to
-why Postfix didn't use the null sender like everyone else, and was informed that it
+why Postfix didn't use the null sender like other mailers, and was informed that it
 was because some broken mailers don't accept the null sender even though it is 
-required in the SMTP RFCs.  However, since Exim and others don't seem to have a 
-problem with it, it is hard to believe that that is the reason.
+required in the SMTP RFCs.
 <P>
 
 Unfortunately, this causes a problem when trying to work around the wierd behavior 
