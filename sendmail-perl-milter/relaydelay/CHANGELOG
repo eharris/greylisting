@@ -3,6 +3,15 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2003-07-15 - Added an update whereby manual whitelist entries for localhost
+    and other local interface addresses are no longer necessary, as the 
+    milter now considers any mail that is "looped back" on a local interface
+    as being local and exempt from the greylist checks.
+
+  2003-07-15 - Fixed a bug where mail that looks as if it is spoofed from
+    a local domain was not being checked, due to sendmail lying about it 
+    coming from the "local" mailer when it's really not local.
+
   2003-07-13 - CONFIG CHANGE - Changed the milter to have config parameters
     for the milter/sendmail interface.  Now the only option to the milter
     script is an optional config file if different from the default location.

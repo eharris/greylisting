@@ -588,8 +588,6 @@ sub envrcpt_callback
     $relay_maybe_forged = (length($4) > 0 ? 1 : 0);
   }
   my $relay_name_reversed = reverse($relay_name);
-  print "  Relay: $tmp\n" if ($verbose);
-  print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - PossiblyForged: $relay_maybe_forged\n" if ($verbose);
         
   # Collect the rest of the info for our checks
   my $mail_mailer = $ctx->getsymval("{mail_mailer}");
@@ -599,17 +597,28 @@ sub envrcpt_callback
   my $queue_id    = $ctx->getsymval("{i}");
   my $authen      = $ctx->getsymval("{auth_authen}");
   my $authtype    = $ctx->getsymval("{auth_type}");
+  my $ifaddr      = $ctx->getsymval("{if_addr}");
 
+  print "  Relay: $tmp - If_Addr: $ifaddr\n" if ($verbose);
+  print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - PossiblyForged: $relay_maybe_forged\n" if ($verbose);
   print "  From: $sender - To: $recipient\n" if ($verbose);
   print "  InMailer: $mail_mailer - OutMailer: $rcpt_mailer - QueueID: $queue_id\n" if ($verbose);
 
   # Only do our processing if the inbound mailer is an smtp variant.
   #   A lot of spam is sent with the null sender address <>.  Sendmail reports 
-  #   that as being from the local mailer, so we have a special case that needs
-  #   handling (but only if not also from localhost).
-  if (! ($mail_mailer =~ /smtp\Z/i) && ($mail_from ne "<>" || $relay_ip eq "127.0.0.1")) {
+  #   that and other "local looking" from addresses as using the local mailer, 
+  #   even though they are coming from off-site.  So we have to exclude the 
+  #   "local" mailer from the checks since it lies.
+  if (($mail_mailer !~ /smtp\Z/i) and ($mail_mailer !~ /\Alocal\Z/i)) {
     # we aren't using an smtp-like mailer, so bypass checks
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
+    reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
+    goto PASS_MAIL;
+  }
+
+  # Check to see if the mail is looped back on a local interface and skip checks if so
+  if ($ifaddr eq $relay_ip) {
+    print "  Mail delivery is sent from a local interface.  Skipping checks.\n" if ($verbose);
     reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
     goto PASS_MAIL;
   }
