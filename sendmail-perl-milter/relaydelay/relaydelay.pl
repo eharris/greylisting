@@ -543,12 +543,13 @@ sub envrcpt_callback
   my $rcpt_to = $args[0];
 
   # save the useful data
-  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+  if (${$privdata_ref} =~ /\A([\d:,]+)\x00(.*)\x00(.*)\Z/) {
     $rowids = $1;
     $mail_from = $2;
   }
   if (! defined $rowids) {
     print "ERROR: Invalid privdata in envrcpt callback!\n";
+    print "  PRIVDATA: " . ${$privdata_ref} . "\n";
   }
   
   print "Stored Sender: $mail_from\n" if ($verbose);
