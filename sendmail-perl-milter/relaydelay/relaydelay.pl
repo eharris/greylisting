@@ -148,7 +148,7 @@ my $tempfail_messages_after_data_phase = 0;
 #   more than one delivering MTA being used to deliver a particular email.
 #   Practically all setups that are that way have the pool of delivering
 #   MTA's on the same /24 subnet, so that's what we use.
-my $do_relay_lookup_by_subnet = 0;
+my $do_relay_lookup_by_subnet = 1;
 
 # Set this to 0 if you wish to disable the automatic maintenance of the
 #   relay_ip -> relay_name reference table.  Could save an insert 
