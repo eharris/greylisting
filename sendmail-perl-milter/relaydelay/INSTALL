@@ -1,5 +1,5 @@
 
-Prerequisites:
+PREREQUISITES:
 
 1. Make sure you have a version of perl with threading compiled in.  I recommend
    at least 5.8.0.  If for some reason you want to keep an older versino of perl
@@ -13,7 +13,7 @@ Prerequisites:
 5. Make sure you have the perl DBI modules installed, plus the DBD::mysql.
 
 
-To install:
+INSTALLATION:
 
 1. Modify relaydelay.conf to your liking and drop it in the default location
    of /etc/mail, or pass the location of the config file as the parameter 
@@ -85,6 +85,15 @@ To perform nightly maintenance on the database table (keep it pruned for
 speed reasons), add the db_maintenance.pl script to your nightly
 crontab.  Note that no records should be lost, as before they are deleted
 from the active table, they are copied to the reporting table.
+
+UPGRADING:
+
+If you are upgrading from Version a version prior to 0.03, please make
+sure that you have updated your config file to reflect the new available
+options, and that the socket name specified in the relaydelay.conf file
+matches the socket name in your INPUT_MAIL_FILTER line in your sendmail
+config.
+
 
 Enjoy!
 
