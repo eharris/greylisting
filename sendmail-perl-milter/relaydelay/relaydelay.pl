@@ -122,6 +122,13 @@ my $sendmail_accessdb_file = '/etc/mail/access.db';
 # Where the pid file should be stored for relaydelay
 my $relaydelay_pid_file = '/var/run/relaydelay.pid';
 
+# Set this if you want to check mail that would be handled by ALL 
+#   sendmail's defined mailers, rather than just the smtp and esmtp mailers.
+# If you have custom mailers defined that handle smtp traffic, you will
+#   probably want to enable this.  If you have special non-smtp mailers
+# you may want to disable this.  Default is disabled.
+my $force_all_mailer_checks = 0;
+
 # Set this to something nonzero to limit the number of children that the 
 #   milter will spawn.  Since children are never recycled (there seems 
 #   to be a problem doing that with Sendmail::Milter), threads,
@@ -321,7 +328,7 @@ sub envfrom_callback
     my $mail_mailer = $ctx->getsymval("{mail_mailer}");
     
     # Only do format checks if the inbound mailer is an smtp variant.
-    if ($mail_mailer !~ /smtp\Z/i) {
+    if (($mail_mailer !~ /smtp\Z/i) and (! $force_all_mailer_checks)) {
       # we aren't using an smtp-like mailer, so bypass checks
       #print "Envelope From: Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
     }
@@ -869,7 +876,7 @@ sub envrcpt_callback
   #   that and other "local looking" from addresses as using the local mailer, 
   #   even though they are coming from off-site.  So we have to exclude the 
   #   "local" mailer from the exemption since it lies.
-  if (($mail_mailer !~ /smtp\Z/i) and ($mail_mailer !~ /\Alocal\Z/i)) {
+  if (($mail_mailer !~ /smtp\Z/i) and ($mail_mailer !~ /\Alocal\Z/i) and (! $force_all_mailer_checks)) {
     # we aren't using an smtp-like mailer, so bypass checks
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
     reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
