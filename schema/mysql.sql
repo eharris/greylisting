@@ -74,22 +74,22 @@ create table dns_name        # Stores the reverse dns name lookup for records
 );
 
 # This table is not used yet, possibly never will be
-create table mail_log        # Stores a record for every mail delivery attempt
-(
-        id              bigint          NOT NULL        auto_increment, # unique log entry id
-        relay_ip        varchar(16)     NOT NULL,                       # sending relay in IPV4 ascii dotted quad notation
-        relay_name      varchar(255),                                   # sending relay dns name
-        dns_mismatch    bool            NOT NULL,                       # true if does not match, false if matches or no dns
-        mail_from       varchar(255)    NOT NULL,                       # the mail from: address
-        rcpt_to         varchar(255)    NOT NULL,                       # the rcpt to: address
-        rcpt_host       varchar(80)     NOT NULL,                       # the id (hostname) of the host that generated this row
-        create_time     datetime        NOT NULL,                       # timestamp of inserted time, since no updates
-
-        primary key(id),
-        key(relay_ip),
-        key(mail_from(20)),
-        key(rcpt_to(20))
-);
+#create table mail_log        # Stores a record for every mail delivery attempt
+#(
+#        id              bigint          NOT NULL        auto_increment, # unique log entry id
+#        relay_ip        varchar(16)     NOT NULL,                       # sending relay in IPV4 ascii dotted quad notation
+#        relay_name      varchar(255),                                   # sending relay dns name
+#        dns_mismatch    bool            NOT NULL,                       # true if does not match, false if matches or no dns
+#        mail_from       varchar(255)    NOT NULL,                       # the mail from: address
+#        rcpt_to         varchar(255)    NOT NULL,                       # the rcpt to: address
+#        rcpt_host       varchar(80)     NOT NULL,                       # the id (hostname) of the host that generated this row
+#        create_time     datetime        NOT NULL,                       # timestamp of inserted time, since no updates
+#
+#        primary key(id),
+#        key(relay_ip),
+#        key(mail_from(20)),
+#        key(rcpt_to(20))
+#);
 
 ############################################################################
 #
@@ -100,11 +100,10 @@ create table mail_log        # Stores a record for every mail delivery attempt
 ############################################################################
 
 # Example wildcard whitelists for subnets
-INSERT INTO relaytofrom (relay_ip, record_expires, create_time) VALUES ('127.0.0.1', '9999-12-31 23:59:59', NOW());
-INSERT INTO relaytofrom (relay_ip, record_expires, create_time) VALUES ('192.168', '9999-12-31 23:59:59', NOW());
+#INSERT INTO relaytofrom (relay_ip, record_expires, create_time) VALUES ('192.168', '9999-12-31 23:59:59', NOW());
 
 # Example wildcard whitelist entry for a received domain or subdomain
-INSERT INTO relaytofrom (rcpt_to, record_expires, create_time) VALUES ('example.domain.com', '9999-12-31 23:59:59', NOW());
+#INSERT INTO relaytofrom (rcpt_to, record_expires, create_time) VALUES ('example.domain.com', '9999-12-31 23:59:59', NOW());
 
 # interesting queries for reporting on db contents
 # get the delay time of the most persistant non-passed mails, in 5 minute buckets
