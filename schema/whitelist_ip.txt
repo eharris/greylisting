@@ -44,6 +44,7 @@
 64.12.136       # AOL (common pool)
 64.12.137       # AOL
 64.12.138       # AOL
+64.125.132.254  # collab.net (unique sender per attempt)
 66.135.209      # Ebay (for time critical alerts)
 66.135.197      # Ebay
 66.218.66       # Yahoo Groups servers (common pool, no retry)
