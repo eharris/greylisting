@@ -1,0 +1,66 @@
+
+SENDMAIL ISSUES:
+ 
+While many people still use relay-domains to specify the domains you wish
+to allow sendmail to relay for, I consider it to be deprecated, and
+discourage the use of relay-domains.  A better, more flexible, and safer
+alternative is to use the access db functionality of sendmail, which
+relaydelay will observe (if enabled).
+
+If you have any entries in your relay-domains file, it is strongly
+suggested that you remove them and place them in the access file
+instead.  You can even specify which type of relaying you wish to allow
+by using the appropriate tag To: or Connect: tags on the LHS.
+
+For more information, please see:
+
+http://www.sendmail.org/~ca/email/doc8.12/cf/m4/anti_spam.html
+
+Enable the access db functionality in sendmail by adding the following
+to your sendmail.mc and recompiling:
+
+FEATURE(`access_db')
+
+
+
+SENDMAIL ACCESS DB HANDLING BY RELAYDELAY:
+
+For those interested in the precedence ordering of the milter's access db 
+checks, here are the order that checks are done:
+
+First, the greylist database is checked if there is a matching record (full
+or partial) for the relay or recipient.  If there is a record, no further 
+whitelist/blacklist checks are done, and the mail is handled according to 
+the settings in the record.  If there is no record found, then the milter 
+continues on to check the access db.  
+
+For the access db checks, first we check to see if there is a Connect: 
+tagged or generic (untagged) entry for the relay ip and dns name of the 
+client.  If an entry is found, and the value is set to "RELAY", then 
+checks are bypassed.
+
+If either an entry is not found, or the found entry is not set to RELAY, we 
+then check for Spam: tagged entries with the recipient's address and domain 
+information, and if an entry is found and the RHS is set to FRIEND, then we 
+bypass the checks.
+
+In this manner, we can change the default behavior of the milter to be 
+either opt-in or opt-out for a particular domain.  For example, a set of
+entries like this:
+
+Spam:somedomain.xx         FRIEND
+Spam:user@somedomain.xx    HATER
+
+will cause the milter to greylist mail for user@somedomain.xx, but mail 
+for all other users at somedomain.xx will not be checked.
+
+Of course, it is more desirable to put exception rules in the greylisting
+database for both performance and reporting reasons.  But the milter now 
+supports checking the access database so as not to require system 
+administrators to keep both updated (since sendmail defaults to not allow
+relaying unless there is a matching entry in the access db).
+
+NOTE: The greylisting db does not yet support white/blacklist entries 
+  based on the dns name of the relay.  If you need dns based entries,
+  you have to use the access db.
+

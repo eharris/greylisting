@@ -3,6 +3,12 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2003-07-22 - Added functionality to check the sendmail access db and 
+    bypass the greylist checks if an appropriate entry is found.
+    Also rearranged the checks so that rows in the greylist database will 
+    have their message counts updated even if there is another test that
+    causes the greylist checks to be skipped.
+
   2003-07-22 - Cleaned up a small mite in the reverse_track function.  It
     probably won't cause anyone trouble, but fixed anyway.
 

@@ -78,8 +78,10 @@ INSTALLATION:
    the startup of the script into your sendmail start script(s).
 
 If you will be doing initial install learning by setting the $delay_mail_secs
-configuration parameter to zero, don't forget to set it to a normal value 
-after a few days of runtime.
+configuration parameter to zero, you may also want to reduce the lifetime of
+the successful transmission records so that you don't pollute the database
+with too much spam.  And don't forget to change them back to normal values
+after a few days of learning runtime.  
 
 To perform nightly maintenance on the database table (keep it pruned for
 speed reasons), add the db_maintenance.pl script to your nightly
@@ -88,7 +90,7 @@ from the active table, they are copied to the reporting table.
 
 UPGRADING:
 
-If you are upgrading from Version a version prior to 0.03, please make
+If you are upgrading from Version a version prior to 0.04, please make
 sure that you have updated your config file to reflect the new available
 options, and that the socket name specified in the relaydelay.conf file
 matches the socket name in your INPUT_MAIL_FILTER line in your sendmail
