@@ -39,9 +39,10 @@ To install:
    reasonable number if you haven't already done so.  The milter will spawn
    as many copies of itself as it needs to to service all the concurrent 
    sendmail processes, and the memory use could get quite large if a large
-   spam wave came in.  To limit this, add something like:
+   spam wave came in.  Each milter copy also consumes a database connection,
+   which you may also run out of.  To limit this, add something like:
 
-   define(`confMAX_DAEMON_CHILDREN', `25')dnl
+   define(`confMAX_DAEMON_CHILDREN', `40')dnl
 
    to your sendmail.mc.  Adjust the limit as appropriate for your normal
    level of email.  Also make sure your database can handle more than 

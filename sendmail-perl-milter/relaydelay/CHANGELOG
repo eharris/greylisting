@@ -3,6 +3,19 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2003-07-10 - NEW OPTION - Added a new feature to automatically 
+    pre-whitelist recipients of locally generated outbound mail.  Mail that 
+    is relayed for another IP-wildcard whitelisted host, or sent from an 
+    authenticated sender is also considered local for the purposes of this 
+    feature.
+
+  2003-07-10 - Removed the table locking from the milter.  Made some changes
+    to a few queries to make the ordering of returned rows deterministic.
+    As a result of the removing the DB locks, there is now a very small 
+    (miniscule) race condition that may allow duplicate rows to be 
+    inserted into the database, but the changes to the queries makes it so
+    that duplicates will not cause any noticable harm.
+
   2003-07-09 - Uncovered a slight accounting problem in the milter that 
     caused some rows not to be expired as they should, as well as 
     incorrectly updating the passed_count.  The problem only shows itself

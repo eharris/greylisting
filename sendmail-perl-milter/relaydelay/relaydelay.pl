@@ -142,6 +142,19 @@ my $check_envelope_address_format = 1;
 #   should probably be enabled.
 my $pass_mail_when_db_unavail = 0;
 
+# Set this to true if you want to try to track locally originated mail
+#   so that replies are not delayed.  This adds several queries to the
+#   db overhead for each local mail processed, so use with caution.
+#   Also considers mail sent from whitelisted IP's and authenticated
+#   senders as local in case we are acting as a smarthost for them.
+my $reverse_mail_tracking = 1;
+  
+# This controls the lifetime of the automatic reverse whitelisting of
+#   senders that we have seen locally originated mail sent to.  Only 
+#   used if $reverse_mail_tracking is enabled.
+my $reverse_mail_life_secs = 4 * 24 * 3600;  # 4 Days
+
+
 #############################################################
 # End of options for use in external config file
 #############################################################
@@ -448,6 +461,61 @@ sub abort_callback
 }
 
 
+# This function is called in all the instances when we want to create a reverse
+#   whitelist entry for recipients of oubound mail so they will not be delayed
+#   when they reply.  This is where we do the necessary checks and create
+#   the record.
+# If there already exists only one active record of the right type, but where 
+#   the block has not yet expired, then we update it so the block expires 
+#   immediately.  This is so internal people can force mail to come through by 
+#   sending a mail to the sender.  It would be nice if we could update all
+#   matching rows, but that is too prone to abuse by spammers who may know
+#   posting patterns from mailing lists and such.
+# Since we have no way of knowing if another different type of record may allow
+#   the return mail to pass, sometimes the reverse record we create isn't 
+#   necessary, but they'll age off fairly quickly.
+# If any sql calls fail, we either ignore them or simply return, since these 
+#   updates aren't critical to the mail handling process.
+sub reverse_track($$$)
+{
+  my $dbh = shift;
+  my $mail_from = shift;
+  my $rcpt_to = shift;
+
+  print "  IN REVERSE_TRACK\n" if ($verbose);
+
+  my $query = "SELECT id FROM relaytofrom WHERE record_expires > NOW() AND mail_from = ? AND rcpt_to = ?";
+  my $sth = $dbh->prepare($query) or return;
+  # Note the reversed from and to fields! 
+  $sth->execute($rcpt_to, $mail_from) or return;
+  my $rowid = $sth->fetchrow_array();
+  my $nextrowid = $sth->fetchrow_array();
+  $sth->finish();
+
+  if (defined($rowid) and !defined($nextrowid)) {
+    # There's only one matching row, so if it's auto, and not already unblocked, unblock it.
+    my $rows = $dbh->do("UPDATE relaytofrom SET block_expires = NOW() "
+      . " WHERE block_expires > NOW() AND origin_type = 'AUTO' AND id = $rowid");
+    print "  Reverse tracking row updated to unblock.  rowid: $rowid\n" if ($verbose and $rows);
+    return;
+  }
+  return if (defined($rowid));
+
+  # If got here, then need to create a reverse record
+  my $sth = $dbh->prepare("INSERT INTO relaytofrom "
+    . " (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) "
+    . " VALUES (NULL,?,?,NOW(),NOW() + INTERVAL $reverse_mail_life_secs SECOND,'AUTO',NOW())") or goto DB_FAILURE;
+  # Note the reversed from and to fields! 
+  $sth->execute($rcpt_to, $mail_from);
+  $sth->finish;
+  if ($verbose) {
+    # Get the rowid for the debugging message
+    $rowid = $dbh->selectrow_array("SELECT LAST_INSERT_ID()");
+    print "  Reverse tracking row successfully inserted for the recipient of this mail.  rowid: $rowid\n";
+  }
+}
+
+
 # Here we perform the bulk of the work, since here we have individual recipient
 #   information, and can act on it.
 
@@ -529,6 +597,7 @@ sub envrcpt_callback
   if (! ($mail_mailer =~ /smtp\Z/i) && ($mail_from ne "<>" || $relay_ip eq "127.0.0.1")) {
     # we aren't using an smtp-like mailer, so bypass checks
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
+    reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
     goto PASS_MAIL;
   }
 
@@ -537,6 +606,7 @@ sub envrcpt_callback
   {
     print "  AuthType: $authtype - Credentials: $authen\n" if ($verbose);
     print "  Mail delivery is authenticated.  Skipping checks.\n" if ($verbose);
+    reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
     goto PASS_MAIL;
   }
 
@@ -575,6 +645,7 @@ sub envrcpt_callback
       }
       if ($whitelisted) {
         print "  Whitelisted Relay.  Skipping checks and passing the mail.\n" if ($verbose);
+        reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
         goto PASS_MAIL;
       }
     }
@@ -637,7 +708,7 @@ sub envrcpt_callback
   }
 
   # Check to see if we already know this triplet set, and if the initial block is expired
-  my $query = "SELECT id, NOW() > block_expires FROM relaytofrom "
+  my $query = "SELECT id, NOW() > block_expires, origin_type, relay_ip FROM relaytofrom "
     .         "  WHERE record_expires > NOW() "
     .         "    AND mail_from = " . $dbh->quote($mail_from)
     .         "    AND rcpt_to   = " . $dbh->quote($rcpt_to);
@@ -645,22 +716,35 @@ sub envrcpt_callback
     # Remove the last octet for a /24 subnet, and add the .% for use in a like clause
     my $tstr = $relay_ip;
     $tstr =~ s/\A(.*)\.\d+\Z/$1.%/;
-    $query .= "    AND relay_ip LIKE " . $dbh->quote($tstr);
+    $query .= "    AND (relay_ip LIKE " . $dbh->quote($tstr);
   }
   else {
     # Otherwise, use the relay_ip as an exact match
-    $query .= "    AND relay_ip  = " . $dbh->quote($relay_ip);
+    $query .= "    AND (relay_ip = " . $dbh->quote($relay_ip);
   }
+  # Changed to order by relay_ip being null, as this will return more specific records (matching IP) before ones with 
+  #   relay_ip being null.
+  # Changed to suborder by id, as this will make the query deterministic as far as which row is returned when there are 
+  #   dupes.  We try to avoid dupes, but they are still theoretically possible.
+  $query .= " OR relay_ip IS NULL) ORDER BY relay_ip IS NULL, id";
 
   my $sth = $dbh->prepare($query) or goto DB_FAILURE;
   $sth->execute() or goto DB_FAILURE;
-  ($rowid, my $block_expired) = $sth->fetchrow_array();
+  ($rowid, my $block_expired, my $origin_type, my $recorded_relay_ip) = $sth->fetchrow_array();
   goto DB_FAILURE if ($sth->err);
   $sth->finish();
 
   if ($rowid > 0) {
     if ($block_expired) {
       print "  Email is known and block has expired.  Passing the mail.  rowid: $rowid\n" if ($verbose);
+      # If this record is a reverse tracking record with unknown IP, then 
+      #   update it to include the now-known IP (if tracking is enabled)
+      if ($reverse_mail_tracking and !defined($recorded_relay_ip) and $origin_type eq "AUTO") {
+        print "  Updating reverse tracking row with the source IP address.\n" if ($verbose);
+        $dbh->do("UPDATE relaytofrom SET relay_ip = " . $dbh->quote($relay_ip) 
+          . " WHERE id = $rowid AND relay_ip IS NULL");
+        # This is a non-critical update, so don't bother checking if updated any rows
+      }
       goto PASS_MAIL;
     }
     else {
@@ -669,51 +753,38 @@ sub envrcpt_callback
       goto DELAY_MAIL;
     }
   }
-  else {
-    # This is a new and unknown triplet, so create a tracking record, but make sure we don't create duplicates
-    # FIXME - We use table locking to ensure non-duplicate rows.  Since we can't do it with a unique multi-field key 
-    #   on the triplet fields (the key would be too large), it's either this or normalizing the data to have seperate 
-    #   tables for each triplet field.  While that would be a good optimization, it would make this too complex for 
-    #   an example implementation.
-    $dbh->do("LOCK TABLE relaytofrom WRITE") or goto DB_FAILURE;
 
-    # we haven't reset $query, so we can reuse it (since it is almost exactly the same), don't even need to re-prepare it
-    $sth->execute() or goto DB_FAILURE;
-    ($rowid, my $block_expired) = $sth->fetchrow_array();
-    goto DB_FAILURE if ($sth->err);
-    $sth->finish();
+  # If got here, then this is a new and unknown triplet, so create a tracking record
+  # There is a tiny race condition here that may allow two exactly concurrent mail deliveries with the exact
+  #   same triplet info to two seperate MX hosts to create duplicate rows.  The real chances this will happen 
+  #   are EXTREMELY small, but we still account for the possibility by doing row ordering on the query above.
 
-    if ($rowid > 0) {
-      # A record already exists, which is unexpected at this point.  unlock tables and give a temp failure
-      $dbh->do("UNLOCK TABLE") or goto DB_FAILURE;
-      print "  Error: Row already exists while attempting to insert.  Issuing a tempfail.\n" if ($verbose);
-      goto DELAY_MAIL;
-    }
+  my $sth = $dbh->prepare("INSERT INTO relaytofrom "
+    . "        (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) "
+    . " VALUES (?,?,?,NOW() + INTERVAL $delay_mail_secs SECOND,NOW() + INTERVAL $auto_record_life_secs SECOND, "
+    . "   'AUTO', NOW())") or goto DB_FAILURE;
+  $sth->execute($relay_ip, $mail_from, $rcpt_to) or goto DB_FAILURE;
+  $sth->finish;
 
-    my $sth = $dbh->prepare("INSERT INTO relaytofrom "
-      . "        (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) "
-      . " VALUES (?,?,?,NOW() + INTERVAL $delay_mail_secs SECOND,NOW() + INTERVAL $auto_record_life_secs SECOND, "
-      . "   'AUTO', NOW())") or goto DB_FAILURE;
-    $sth->execute($relay_ip, $mail_from, $rcpt_to) or goto DB_FAILURE;
-    $sth->finish;
-
-    # Get the rowid of the row we just inserted (used later for updating)
-    $rowid = $dbh->selectrow_array("SELECT LAST_INSERT_ID()");
+  # Get the rowid of the row we just inserted (used later for updating)
+  $rowid = $dbh->selectrow_array("SELECT LAST_INSERT_ID()");
     
-    # And release the table lock
-    $dbh->do("UNLOCK TABLE") or goto DB_FAILURE;
-
-    if ($delay_mail_secs == 0) {
-      print "  New mail row successfully inserted.  Passing mail.  rowid: $rowid\n" if ($verbose);
-      # and now jump to normal blocking actions
-      goto PASS_MAIL;
-    }
-
-    print "  New mail row successfully inserted.  Issuing a tempfail.  rowid: $rowid\n" if ($verbose);
+  if ($delay_mail_secs == 0) {
+    print "  New mail row successfully inserted.  Passing mail.  rowid: $rowid\n" if ($verbose);
     # and now jump to normal blocking actions
-    goto DELAY_MAIL;
+    goto PASS_MAIL;
   }
 
+  print "  New mail row successfully inserted.  Issuing a tempfail.  rowid: $rowid\n" if ($verbose);
+  # and now jump to normal blocking actions
+  goto DELAY_MAIL;
+
+
+  ###########################################################################
+  #
+  # Here we have the goto tags for finishing the mail processing
+  #
+  ###########################################################################
 
   DELAY_MAIL:
   # Increment the blocked count (if rowid is defined)
