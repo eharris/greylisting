@@ -4,7 +4,7 @@
 #
 # File: relaydelay.pl
 #
-# Version: 0.02
+# Version: 0.05 prerelease
 # 
 # Programmer: Evan J. Harris <eharris@puremagic.com>
 #
@@ -36,6 +36,7 @@ use Socket;
 use POSIX qw(strftime);
 use Errno qw(ENOENT);
 
+use DB_File;
 use DBI;
 
 use strict;
@@ -80,6 +81,25 @@ my $milter_filter_name = 'relaydelay';
 #   definition in the sendmail.mc file.
 my $milter_socket_connection = 'local:/var/run/relaydelay.sock';
 
+# This config option specifies where sendmail's access.db file is located.  
+#   If you don't want the milter to check the access.db, just set this equal 
+#   to undef.
+# If enabled, the access db will be checked to see if there are matching
+#   ip or address entries that should make us bypass the greylist checks.
+# NOTE: These checks assume that the sendmail FEATURE(`relay_hosts_only') 
+#   is not enabled.  If you do have that enabled, the checks in the milter
+#   will be more permissive than you want.
+#   In addition, the milter will heed entries in the access db even if
+#   your sendmail configuration doesn't check certain types, so make sure
+#   you don't have any entries that sendmail will ignore unless you want 
+#   to suffer the consequences.
+#   For more information on access db options, see:
+#     http://www.sendmail.org/~ca/email/doc8.12/cf/m4/anti_spam.html
+#   For additional information, please also see the README file.
+#
+#my $sendmail_accessdb_file = undef;
+my $sendmail_accessdb_file = '/etc/mail/access.db';
+
 # Where the pid file should be stored for relaydelay
 my $relaydelay_pid_file = '/var/run/relaydelay.pid';
 
@@ -89,6 +109,10 @@ my $relaydelay_pid_file = '/var/run/relaydelay.pid';
 #   once created, will exist until the milter is shutdown.  Each thread
 #   also consumes a database connection, so limiting db connections and
 #   memory footprint are both good reasons to set this.
+# If your mail server handles a large amount of mail, you may need to 
+#   increase this limit to avoid blocking, but the default limit is
+#   already pretty high, and should be sufficient for all but very 
+#   large sites.
 # Setting to zero makes the number of threads unlimited.
 my $maximum_milter_threads = 40;
 
@@ -148,7 +172,7 @@ my $tempfail_messages_after_data_phase = 0;
 #   more than one delivering MTA being used to deliver a particular email.
 #   Practically all setups that are that way have the pool of delivering
 #   MTA's on the same /24 subnet, so that's what we use.
-my $do_relay_lookup_by_subnet = 0;
+my $do_relay_lookup_by_subnet = 1;
 
 # Set this to 0 if you wish to disable the automatic maintenance of the
 #   relay_ip -> relay_name reference table.  Could save an insert 
@@ -366,6 +390,7 @@ sub envfrom_callback
   #     and would eventually segfault.  So went back to using a scalar.
   my $privdata = "0\x00$mail_from\x00\x00$helo_name";
   $ctx->setpriv(\$privdata);
+
   return SMFIS_CONTINUE;
 }
 
@@ -425,7 +450,7 @@ sub eom_callback
   #   delivery attempt looks like it is a SMTP callback, which needs to wait for
   #   after the DATA phase to issue the tempfail)
   #   (We use a special rowid value of 00 to indicate a needed block)
-  if ($rowids eq "00" or $tempfail_messages_after_data_phase) {
+  if ($rowids eq "00") {
     # Set the reply code to the normal default, but with a modified text part.
     #   I added the (TEMPFAIL) so it is easy to tell in the syslogs if the failure was due to
     #     the processing of the milter, or if it was due to other causes within sendmail
@@ -596,14 +621,14 @@ sub reverse_track($$$)
   # If got here, then need to create a reverse record
   $sth = $dbh->prepare("INSERT INTO relaytofrom "
     . " (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) "
-    . " VALUES (NULL,?,?,NOW(),NOW() + INTERVAL $reverse_mail_life_secs SECOND,'AUTO',NOW())") or goto DB_FAILURE;
+    . " VALUES (NULL,?,?,NOW(),NOW() + INTERVAL $reverse_mail_life_secs SECOND,'AUTO',NOW())");
   # Note the reversed from and to fields! 
   $sth->execute($rcpt_to, $mail_from);
   $sth->finish;
   if ($verbose) {
     # Get the rowid for the debugging message
-    $rowid = $dbh->selectrow_array("SELECT LAST_INSERT_ID()");
-    print "  Reverse tracking row successfully inserted for the recipient of this mail.  rowid: $rowid\n";
+    $rowid = $dbh->selectrow_array("SELECT LAST_INSERT_ID()") and
+      print "  Reverse tracking row successfully inserted for the recipient of this mail.  rowid: $rowid\n";
   }
 }
 
@@ -683,6 +708,8 @@ sub envrcpt_callback
   my $authtype    = $ctx->getsymval("{auth_type}");
   my $ifaddr      = $ctx->getsymval("{if_addr}");
 
+  # Sendmail seems to sometimes not pass the {if_addr} if the relay_ip is localhost, so fix that
+  $ifaddr = $relay_ip if (!defined $ifaddr and $relay_ip eq "127.0.0.1");
 
   # Increment the attempted recipient count for this mail client
   if ($enable_relay_name_updates) {
@@ -690,10 +717,12 @@ sub envrcpt_callback
     $dbh->do("UPDATE relaystats SET rcpt_attempts = rcpt_attempts + 1 WHERE relay_ip = '$relay_ip'");
   }
 
-  print "  Relay: $tmp - If_Addr: $ifaddr\n" if ($verbose);
-  print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - PossiblyForged: $relay_maybe_forged\n" if ($verbose);
-  print "  From: $sender - To: $recipient\n" if ($verbose);
-  print "  InMailer: $mail_mailer - OutMailer: $rcpt_mailer - QueueID: $queue_id\n" if ($verbose);
+  if ($verbose) {
+    print "  Relay: $tmp - If_Addr: $ifaddr\n";
+    print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - PossiblyForged: $relay_maybe_forged\n";
+    print "  From: $sender - To: $recipient\n";
+    print "  InMailer: $mail_mailer - OutMailer: $rcpt_mailer - QueueID: $queue_id\n";
+  }
 
 
   # Store and maintain the dns_name of the relay if we have one
@@ -768,11 +797,175 @@ sub envrcpt_callback
   }
 
 
-  # Only do our processing if the inbound mailer is an smtp variant.
-  #   A lot of spam is sent with the null sender address <>.  Sendmail reports 
+  # Generate all the subparts of relay_ip, mail_from, rcpt_to, and relay_name for later checks
+  my @relay_ip_parts;
+  my @relay_name_parts;
+  my @from_domain_parts;
+  my $from_domain;
+  my $from_username;
+  my @rcpt_domain_parts;
+  my $rcpt_domain;
+  my $rcpt_username;
+  {
+    # - Generate a list of the relay_ip parts
+    my $tstr = $relay_ip;
+    for (my $loop = 0; $loop < 4; $loop++) {
+      push @relay_ip_parts, $tstr;
+      $tstr =~ s/\A(.*)\.\d+\Z/$1/;  # strip off the last octet
+    }
+
+    # - If we have dns and it is not possibly forged, generate the relay_name parts
+    if (length($relay_name) and !$relay_maybe_forged) {
+      $tstr = $relay_name;
+      while (index($tstr, ".") > 0) {
+        push @relay_name_parts, $tstr;
+        $tstr =~ s/\A[^.]+\.(.*)\Z/$1/;  # strip off the leftmost domain part
+      }
+      push @relay_name_parts, $tstr;  # Get the last part
+    }
+
+    # - Pull out the domain of the sender
+    $tstr = $mail_from;
+    $tstr = $1 if ($tstr =~ /\A<(.*)>\Z/);  # Remove outer angle brackets if present
+    $tstr =~ s/\A(.*)@([^@]*)\Z/$2/;  # strip off everything before and including the last @
+    $from_username = $1;     # save the username part
+    $from_domain = $tstr;    # save the sender subdomain
+    # - Now generate the list of from_domain subparts
+    while (index($tstr, ".") > 0) {
+      push @from_domain_parts, $tstr;
+      $tstr =~ s/\A[^.]+\.(.*)\Z/$1/;  # strip off the leftmost domain part
+    }
+    push @from_domain_parts, $tstr;  # Get the last part
+
+    # - Pull out the domain of the recipient
+    $tstr = $rcpt_to;
+    $tstr = $1 if ($tstr =~ /\A<(.*)>\Z/);  # Remove outer angle brackets if present
+    $tstr =~ s/\A(.*)@([^@]*)\Z/$2/;  # strip off everything before and including the last @
+    $rcpt_username = $1;     # save the username part
+    $rcpt_domain = $tstr;    # save the rcpt subdomain
+    # - Now generate the list of rcpt_domain subparts
+    while (index($tstr, ".") > 0) {
+      push @rcpt_domain_parts, $tstr;
+      $tstr =~ s/\A[^.]+\.(.*)\Z/$1/;  # strip off the leftmost domain part
+    }
+    push @rcpt_domain_parts, $tstr;  # Get the last part
+  }
+
+
+  # Check wildcard black or whitelisting based on ip address and subnet
+  #   Do the check in such a way that more exact matches are returned first
+  if ($check_wildcard_relay_ip) {
+    my $subquery;
+    foreach my $part (@relay_ip_parts) {
+      $subquery .= " OR " if (defined $subquery);
+      $subquery .= "relay_ip = " . $dbh->quote($part);
+    }
+    my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
+      .         "  WHERE record_expires > NOW() "
+      .         "    AND mail_from IS NULL "
+      .         "    AND rcpt_to   IS NULL "
+      .         "    AND ($subquery) "
+      .         "  ORDER BY length(relay_ip) DESC";
+
+    my $sth = $dbh->prepare($query) or goto DB_FAILURE;
+    $sth->execute() or goto DB_FAILURE;
+    ($rowid, my $blacklisted, my $whitelisted) = $sth->fetchrow_array();
+    goto DB_FAILURE if ($sth->err);
+    $sth->finish();
+
+    if (defined $rowid) {
+      if ($blacklisted) {
+        print "  Blacklisted Relay.  Skipping checks and rejecting the mail.  rowid: $rowid\n" if ($verbose);
+        goto DELAY_MAIL;
+      }
+      if ($whitelisted) {
+        print "  Whitelisted Relay.  Skipping checks and passing the mail.  rowid: $rowid\n" if ($verbose);
+        reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
+        goto PASS_MAIL;
+      }
+    }
+  }
+
+
+  # See if this recipient (or domain/subdomain) is wildcard white/blacklisted
+  #   Do the check in such a way that more exact matches are returned first
+  if ($check_wildcard_rcpt_to) {
+    my $subquery;
+    foreach my $key ("<$rcpt_username\@$rcpt_domain>", "$rcpt_username\@$rcpt_domain", "$rcpt_username\@", @rcpt_domain_parts)
+    {
+      $subquery .= " OR " if (defined $subquery);
+      $subquery .= "rcpt_to = " . $dbh->quote($key);
+    }
+    my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
+      .         "  WHERE record_expires > NOW() "
+      .         "    AND relay_ip  IS NULL "
+      .         "    AND mail_from IS NULL "
+      .         "    AND ($subquery) "
+      .         "  ORDER BY length(rcpt_to) DESC";
+
+    my $sth = $dbh->prepare($query) or goto DB_FAILURE;
+    $sth->execute() or goto DB_FAILURE;
+    ($rowid, my $blacklisted, my $whitelisted) = $sth->fetchrow_array();
+    goto DB_FAILURE if ($sth->err);
+    $sth->finish();
+
+    if (defined $rowid) {
+      if ($blacklisted) {
+        print "  Blacklisted Recipient.  Skipping checks and rejecting the mail.  rowid: $rowid\n" if ($verbose);
+        goto DELAY_MAIL;
+      }
+      if ($whitelisted) {
+        print "  Whitelisted Recipient.  Skipping checks and passing the mail.  rowid: $rowid\n" if ($verbose);
+        goto PASS_MAIL;
+      }
+    }
+  }
+
+
+  # See if this sender (or domain/subdomain) is wildcard blacklisted
+  # We don't check for whitelisted, since that is too prone to abuse
+  #   Do the check in such a way that more exact matches are returned first
+  if ($check_wildcard_rcpt_to) {
+    my $subquery;
+    foreach my $key ("<$from_username\@$from_domain>", "$from_username\@$from_domain", "$from_username\@", @from_domain_parts)
+    {
+      $subquery .= " OR " if (defined $subquery);
+      $subquery .= "mail_from = " . $dbh->quote($key);
+    }
+    my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
+      .         "  WHERE record_expires > NOW() "
+      .         "    AND relay_ip  IS NULL "
+      .         "    AND rcpt_to IS NULL "
+      .         "    AND ($subquery) "
+      .         "  ORDER BY length(mail_from) DESC";
+
+    my $sth = $dbh->prepare($query) or goto DB_FAILURE;
+    $sth->execute() or goto DB_FAILURE;
+    ($rowid, my $blacklisted, my $whitelisted) = $sth->fetchrow_array();
+    goto DB_FAILURE if ($sth->err);
+    $sth->finish();
+
+    if (defined $rowid) {
+      if ($blacklisted) {
+        print "  Blacklisted Sender.  Skipping checks and rejecting the mail.  rowid: $rowid\n" if ($verbose);
+        goto DELAY_MAIL;
+      }
+      #if ($whitelisted) {
+      #  print "  Whitelisted Sender.  Skipping checks and passing the mail.  rowid: $rowid\n" if ($verbose);
+      #  goto PASS_MAIL;
+      #}
+    }
+  }
+
+
+  # We do these checks after the wildcard entry checks so that if a db entry exists, it will be 
+  #   updated with the mail counts even if it matches one of the following exceptions (for statistics)
+  # Only do our greylist processing if the inbound mailer is an smtp variant.
+  #   This is so we won't try to check uucp and other types of mail.
+  # A lot of spam is sent with the null sender address <>.  Sendmail reports 
   #   that and other "local looking" from addresses as using the local mailer, 
   #   even though they are coming from off-site.  So we have to exclude the 
-  #   "local" mailer from the checks since it lies.
+  #   "local" mailer from the exemption since it lies.
   if (($mail_mailer !~ /smtp\Z/i) and ($mail_mailer !~ /\Alocal\Z/i)) {
     # we aren't using an smtp-like mailer, so bypass checks
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
@@ -797,88 +990,75 @@ sub envrcpt_callback
   }
 
 
-  # Check for local IP relay whitelisting from the sendmail access file
-  # FIXME - needs to be implemented
-  #
+  # Check for IP relay and rcpt email/domain whitelisting from the sendmail access file
+  # We bypass the checks if we are acting as a smart host for this client, or if sendmail will not
+  #   accept the mail anyway and we want to let sendmail give the sender an immediate failure.
+  # As strange as it seems, we do not want to bypass the checks if the value is OK or SKIP.
+  # Only do the access.db checks if the var holding the file name has been defined
+  if (defined $sendmail_accessdb_file) {
+    if (tie (my %accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+      # Tie was successful, now check all the variations of entries we care about
+      my $bypass_checks = 0;
+      my $lhs;
+      my $rhs;
 
-  # Check wildcard black or whitelisting based on ip address or subnet
-  #   Do the check in such a way that more exact matches are returned first
-  if ($check_wildcard_relay_ip) {
-    my $tstr = $relay_ip;
-    my $subquery;
-    for (my $loop = 0; $loop < 4; $loop++) {
-      $subquery .= " OR " if (defined($subquery));
-      $subquery .= "relay_ip = " . $dbh->quote($tstr);
-      $tstr =~ s/\A(.*)\.\d+\Z/$1/;  # strip off the last octet
-    }
-    my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
-      .         "  WHERE record_expires > NOW() "
-      .         "    AND mail_from IS NULL "
-      .         "    AND rcpt_to   IS NULL "
-      .         "    AND ($subquery) "
-      .         "  ORDER BY length(relay_ip) DESC";
-
-    my $sth = $dbh->prepare($query) or goto DB_FAILURE;
-    $sth->execute() or goto DB_FAILURE;
-    ($rowid, my $blacklisted, my $whitelisted) = $sth->fetchrow_array();
-    goto DB_FAILURE if ($sth->err);
-    $sth->finish();
-
-    if (defined $rowid) {
-      if ($blacklisted) {
-        print "  Blacklisted Relay.  Skipping checks and rejecting the mail.\n" if ($verbose);
-        goto DELAY_MAIL;
+      # First check if this client is a host we should relay for (and therefore also not greylist)
+      #   We check against both Connect: entries and generic entries without a LHS tag.
+      foreach my $key (@relay_ip_parts, @relay_name_parts)
+      {   
+        #print "Lookup '$key'\n";
+        $lhs = lc("Connect:$key");
+        $rhs = $accessdb{$lhs};
+        if (defined $rhs) {
+          #print "  found value $rhs\n";
+          $bypass_checks = 1 if ($rhs eq "RELAY");
+          last;
+        }
+        # Now check the generic style
+        $lhs = lc("$key");
+        $rhs = $accessdb{$lhs};
+        if (defined $rhs) {
+          #print "  found value $rhs\n";
+          $bypass_checks = 1 if ($rhs eq "RELAY");
+          last;
+        }
       }
-      if ($whitelisted) {
-        print "  Whitelisted Relay.  Skipping checks and passing the mail.\n" if ($verbose);
+      print "  Whitelisted Relay match found in ACCESS DB.  Skipping checks and passing the mail.\n" 
+        if ($verbose and $bypass_checks);
+
+      # check to see if there is a Spam: FRIEND/HATER entry
+      if (! $bypass_checks) {
+        foreach my $key ("$rcpt_username\@$rcpt_domain", "$rcpt_username\@", @rcpt_domain_parts)
+        {   
+          $lhs = lc("Spam:$key");
+          #print "Lookup '$lhs'\n";
+          $rhs = $accessdb{$lhs};
+          if (defined $rhs) {
+            #print "  found value $rhs\n";
+            $bypass_checks = 1 if ($rhs eq "FRIEND");
+            last;
+          }
+        }
+        print "  Whitelisted Recipient match found in ACCESS DB.  Skipping checks and passing the mail.\n" 
+          if ($verbose and $bypass_checks);
+      }
+      # We do not bypass the checks based on to from addresses, because if they are blocked, they are handled by 
+      #   sendmail, and if they are RELAY or OK, we would still want to protect the recipients from spam.
+
+      untie %accessdb;
+      if ($bypass_checks) {
         reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
         goto PASS_MAIL;
       }
     }
-  }
-
-  # Pull out the domain of the recipient for whitelisting checks
-  my $tstr = $rcpt_to;
-  if ($tstr =~ /\A<(.*)>\Z/) {  # Remove outer angle brackets if present
-    $tstr = $1;
-  }
-  $tstr =~ /@([^@]*)\Z/;  # strip off everything before and including the last @
-  my $rcpt_domain = $1;
-
-  # See if this recipient (or domain/subdomain) is wildcard white/blacklisted
-  #   Do the check in such a way that more exact matches are returned first
-  if ($check_wildcard_rcpt_to) {
-    my $subquery = "rcpt_to = " . $dbh->quote($rcpt_to);
-    my $tstr = $rcpt_domain;
-    while(index($tstr, ".") > 0) {
-      $subquery .= " OR rcpt_to = " . $dbh->quote($tstr);
-      $tstr =~ s/\A[^.]*\.(.*)\Z/$1/;  # strip off the leftmost domain part
-    }
-    my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
-      .         "  WHERE record_expires > NOW() "
-      .         "    AND relay_ip  IS NULL "
-      .         "    AND mail_from IS NULL "
-      .         "    AND ($subquery) "
-      .         "  ORDER BY length(rcpt_to) DESC";
-
-    my $sth = $dbh->prepare($query) or goto DB_FAILURE;
-    $sth->execute() or goto DB_FAILURE;
-    ($rowid, my $blacklisted, my $whitelisted) = $sth->fetchrow_array();
-    goto DB_FAILURE if ($sth->err);
-    $sth->finish();
-
-    if (defined $rowid) {
-      if ($blacklisted) {
-        print "  Blacklisted Recipient.  Skipping checks and rejecting the mail.\n" if ($verbose);
-        goto DELAY_MAIL;
-      }
-      if ($whitelisted) {
-        print "  Whitelisted Recipient.  Skipping checks and passing the mail.\n" if ($verbose);
-        goto PASS_MAIL;
-      }
+    else {
+      # This is not a fatal problem, so warn, but ignore
+      print "ERROR: Unable to open access.db file '$sendmail_accessdb_file': $!\n";
     }
   }
 
+
+  # There doesn't seem to be a wildcard entry for this mail, so do the greylisting check
   # Check to see if we already know this triplet set, and if the initial block is expired
   my $query = "SELECT id, NOW() > block_expires, origin_type, relay_ip FROM relaytofrom "
     .         "  WHERE record_expires > NOW() "
@@ -965,6 +1145,7 @@ sub envrcpt_callback
   # Increment the blocked count (if rowid is defined)
   if (defined $rowid) {
     $dbh->do("UPDATE relaytofrom SET blocked_count = blocked_count + 1 WHERE id = $rowid") or goto DB_FAILURE;
+    print "  * Mail blocked with temporary error.  Incremented blocked count on rowid $rowid\n" if ($verbose);
   }
 
   # FIXME - Should do mail logging?
@@ -1133,6 +1314,15 @@ BEGIN:
       die "Unable to record PID to '$relaydelay_pid_file': $!\n";
     print PIDF "$$\n";
     close PIDF;
+  }
+
+  if (defined $sendmail_accessdb_file) {
+    my %accessdb;
+    # Test that we can open the accessdb file
+    if (! tie (%accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+      die "ERROR: Unable to open access.db file '$sendmail_accessdb_file': $!";
+    }
+    untie %accessdb;
   }
 
   print "Using connection '$milter_socket_connection' for filter $milter_filter_name\n";
