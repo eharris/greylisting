@@ -57,6 +57,19 @@ my $whitelist_check_sender_domain = 1;
 #   delay plus the normal processing time doesn't cause a timeout)
 my $blocked_response_delay_secs = 30;
 
+# Set this to a nonzero value if you want to wait until after the DATA
+#   phase before issuing the TEMPFAIL for delayed messages.  If this
+#   is undefined or zero, then messages will be failed after the RCPT
+#   phase in the smtp session.  Setting this will cause more traffic,
+#   which should be unneccessary, but increases the fault tolerance for
+#   some braindead mailers that don't check the status codes except at
+#   the end of a message transaction.  It does expose a couple of 
+#   liabilities, in that the blocking will only occur if the LAST recipient
+#   in a multi-recipient message is currently blocked.  If the last
+#   recipient is not blocked, the message will go through, even if some
+#   recipients are supposed to be blocked.
+my $tempfail_messages_after_data_phase = 0;
+
 
 # Global vars
 my $global_dbh;
@@ -192,7 +205,7 @@ sub eom_callback
   # If and only if this message is from the null sender, check to see if we should tempfail it
   #   (since we can't delay it after rcpt_to since that breaks exim's recipient callbacks)
   #   (We use a special rowid value of 00 to indicate a needed block)
-  if ($mail_from eq "<>" && $rowids eq "00") {
+  if ($rowids eq "00" and ($mail_from eq "<>" or $tempfail_messages_after_data_phase)) {
     # Set the reply code to the normal default, but with a modified text part.
     $ctx->setreply("451", "4.7.1", "Please try again later (TEMPFAIL)");
     
@@ -498,8 +511,9 @@ sub envrcpt_callback
   # Special handling for null sender.  Spammers use it a ton, but so do things like exim's callback sender
   #   verification spam checks.  If the sender is the null sender, we don't want to block it now, but will
   #   instead block it at the eom phase.
-  if ($mail_from eq "<>") {
-    print "  Mail is from null sender.  Delaying tempfail reject until eom phase.\n";
+  if ($mail_from eq "<>" or $tempfail_messages_after_data_phase) {
+    #print "  Mail is from null sender.  Delaying tempfail reject until eom phase.\n";
+    print "  Delaying tempfail reject until eom phase.\n";
   
     # save that this message needs to be blocked later in the transaction (after eom)
     my $privdata = "00\x00$mail_from\x00$rcpt_to";
@@ -669,6 +683,8 @@ BEGIN:
 
   print "Starting Sendmail::Milter $Sendmail::Milter::VERSION engine.\n";
 
+  # Parameters to main are max num of interpreters, num requests to service before recycling threads
+  #if (Sendmail::Milter::main(10, 30)) {
   if (Sendmail::Milter::main()) {
     print "Successful exit from the Sendmail::Milter engine.\n";
   }
@@ -676,4 +692,12 @@ BEGIN:
     print "Unsuccessful exit from the Sendmail::Milter engine.\n";
   }
 }
+
+
+# Make sure when threads are recycled that we release the global db connection
+END {
+  print "Closing DB connection.\n";
+  db_disconnect();
+}
+
 
