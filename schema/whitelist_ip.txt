@@ -10,7 +10,37 @@
 # These are common entries that most people using greylisting will probably 
 # want to have.  If you happen to discover ones that aren't in this list, 
 # or that the IP's in this list have changed, please let me know at 
-# eharris@puremagic.com.
+# eharris@puremagic.com, after reading the next paragraph carefully.
+
+# PLEASE NOTE - PLEASE NOTE - PLEASE NOTE - PLEASE NOTE - PLEASE NOTE
+# Any submission for inclusion to this list should be accompanied by
+# the IP's or address range of the mailservers that have a problem sending 
+# to Greylisting servers, the name/url of the organization running these 
+# problem servers, and a detail of the specific reason(s) why their systems
+# have a problem with Greylisting, and also the type of mail server softare
+# they are running (if known).
+
+# Valid reasons for inclusion on this list are:
+#   1. They have a pool of round-robin outbound mail servers that spans more 
+#      than one /24 netblock.
+#   2. They have software that considers a 4xx temporary mail failure to be
+#      a permanent bounce.
+#   3. Their mail servers retry delivery for 4xx failures continually with
+#      no delay.
+#   4. Their mail servers either don't retry at all, or have a very long 
+#      retry delay (more than 5 hours).
+#   5. The mail servers use a unique sender address for each delivery
+#      attempt, even for the same piece of mail.  (also known as VERP).
+#   6. The mail servers host high volume mailing lists with a general appeal
+#      that try to track bounces by using a unique sender address for each
+#      mail (also known as VERP).
+
+# Generally, submissions of servers that do not meet at least one of the 
+# above criteria will not be accepted for inclusion in this list.  This 
+# includes servers that handle Greylisting ok, but that you consider 
+# "legitimate", and don't want their mail delayed.  Since "legitimate" is a
+# subjective distinction, I believe that those types of whitelist entries 
+# are better left for individual administrators to decide.
 
 # Here's an example command to use in a mysql shell to insert 
 #   a whitelist entry (assumes defaults from dbdef.sql):
@@ -45,8 +75,7 @@
 12.107.209.250  # sourceware.org mailing lists (high traffic, unique sender per mail)
 63.82.37.110	# SLmail
 64.7.153.18     # sentex.ca (common pool)
-64.12.136       # AOL (common pool)
-64.12.137       # AOL (common pool)
+64.12.137       # AOL (common pool) - http://postmaster.aol.com/servers/imo.html
 64.12.138       # AOL (common pool)
 64.124.204.39	# moveon.org (unique sender per attempt)
 64.125.132.254  # collab.net (unique sender per attempt)
@@ -75,10 +104,13 @@
 195.238.3.13    # skynet.be (common pool)
 #204.60.8.162	# Groupwise?
 204.107.120.10  # Ameritrade (no retry)
+205.188.139.136	# AOL (common pool)
+205.188.139.137	# AOL (common pool)
+205.188.144.207	# AOL (common pool)
 205.188.144.208	# AOL (common pool)
-205.188.156     # AOL (common pool)
+205.188.156.66  # AOL (common pool)
 205.188.157     # AOL (common pool)
-205.188.159     # AOL (common pool)
+205.188.159.7   # AOL (common pool)
 205.206.231     # SecurityFocus.com (unique sender per attempt)
 205.211.164.50  # sentex.ca (common pool)
 207.115.63      # Prodigy (broken software that retries continually with no delay)
