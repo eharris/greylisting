@@ -194,6 +194,15 @@ my $config_loaded;
 
 
 #######################################################################
+# Constant Definitions
+#######################################################################
+
+use constant DNS_MAYBE_FORGED => 0x0001;
+use constant HELO_MISMATCH    => 0x0002;
+use constant HELO_INVALID     => 0x0004;
+use constant HELO_FORGED      => 0x0008;
+
+#######################################################################
 # Database functions
 #######################################################################
 
@@ -234,6 +243,20 @@ sub db_disconnect {
 #
 #############################################################################
 
+sub helo_callback
+{
+  my $ctx = shift;
+  my $helo_name = shift;
+
+  # If we got a helo, then there is not privdata to get, so don't bother.
+  # Just save what we know, which is just the helo info
+  my $privdata = "0\x00\x00\x00$helo_name";
+  $ctx->setpriv(\$privdata);
+
+  return SMFIS_CONTINUE;
+}
+
+
 # I wasn't going to originally have a envfrom callback, but since the envelope
 # sender doesn't seem to be available through other methods, I use this to
 # save it so we can get it later.  We also make sure the config file is loaded.
@@ -244,6 +267,7 @@ sub envfrom_callback
   my @args = @_;
 
   my $mail_from = $args[0];
+  my $helo_name = "";
 
   if ($check_envelope_address_format) {
     # Get the mailer type
@@ -309,6 +333,30 @@ sub envfrom_callback
     }
   }
 
+  # increment the total mail count for this client
+  if ($enable_relay_name_updates) {
+    my $dbh = db_connect(0);  # Ignore failures
+    # Get the remote hostname and ip in the form "[ident@][hostname] [ip]"
+    my $tmp = $ctx->getsymval("{_}");  
+    my ($relay_ip, $relay_name, $relay_ident, $relay_maybe_forged);
+    if ($tmp =~ /\A(\S*@|)(\S*) ?\[(.*)\]( \(may be forged\)|)\Z/) {
+      $tmp = $3;
+      #print "In ENVFROM callback: $tmp\n" if ($verbose);
+      # Don't care if the update fails.
+      $dbh->do("UPDATE relaystats SET mail_attempts = mail_attempts + 1 WHERE relay_ip = '$tmp'");
+    }
+  }
+
+  # Get the stored info and keep the pertinent parts (the helo info)
+  my $privdata_ref = $ctx->getpriv();
+
+  if (defined $privdata_ref) {
+    # save the useful data
+    if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\x00(.*)\Z/) {
+      $helo_name = $4;
+    }
+  }
+
   # Save our private data (since it isn't available in the same form later)
   #   The format is a comma seperated list of rowids (or zero if none),
   #     followed by the envelope sender followed by the current envelope
@@ -316,9 +364,8 @@ sub envfrom_callback
   #   I would have really rather used a hash or other data structure, 
   #     but when I tried it, Sendmail::Milter seemed to choke on it
   #     and would eventually segfault.  So went back to using a scalar.
-  my $privdata = "0\x00$mail_from\x00";
+  my $privdata = "0\x00$mail_from\x00\x00$helo_name";
   $ctx->setpriv(\$privdata);
-
   return SMFIS_CONTINUE;
 }
 
@@ -337,23 +384,40 @@ sub eom_callback
 
   # Get our status and check to see if we need to do anything else
   my $privdata_ref = $ctx->getpriv();
-  # Clear our private data on this context
-  $ctx->setpriv(undef);
 
   print "  IN EOM CALLBACK - PrivData: " . ${$privdata_ref} . "\n" if ($verbose);
-
-  my $dbh = db_connect(0) or goto DB_FAILURE;
 
   # parse and store the data
   my $rowids;
   my $mail_from;
   my $rcpt_to;
+  my $helo_name;
 
   # save the useful data
-  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\x00(.*)\Z/) {
     $rowids = $1;
     $mail_from = $2;
     $rcpt_to = $3;
+    $helo_name = $4;
+  }
+
+  # reset the priv data, saving only the helo info
+  my $privdata = "0\x00\x00\x00$helo_name";
+  $ctx->setpriv(\$privdata);
+  
+  my $dbh = db_connect(0) or goto DB_FAILURE;
+
+  # increment the successful mail count for this client
+  if ($enable_relay_name_updates) {
+    # Get the remote hostname and ip in the form "[ident@][hostname] [ip]"
+    my $tmp = $ctx->getsymval("{_}");  
+    my ($relay_ip, $relay_name, $relay_ident, $relay_maybe_forged);
+    if ($tmp =~ /\A(\S*@|)(\S*) ?\[(.*)\]( \(may be forged\)|)\Z/) {
+      $tmp = $3;
+      #print "In EOM callback: $tmp\n" if ($verbose);
+      # Don't care if the update fails.
+      $dbh->do("UPDATE relaystats SET mail_received = mail_received + 1 WHERE relay_ip = '$tmp'");
+    }
   }
   
   # If and only if this message should be delayed, but for some reason couldn't be done 
@@ -424,23 +488,27 @@ sub abort_callback
 
   # Get our status and check to see if we need to do anything else
   my $privdata_ref = $ctx->getpriv();
-  # Clear our private data on this context
-  $ctx->setpriv(undef);
 
   print "  IN ABORT CALLBACK - PrivData: " . ${$privdata_ref} . "\n" if ($verbose);
 
   # parse and store the data
   my $rowids;
-  my $mail_from;
+  my $mail_from = "";
   my $rcpt_to;
+  my $helo_name;
 
   # save the useful data
-  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\x00(.*)\Z/) {
     $rowids = $1;
     $mail_from = $2;
     $rcpt_to = $3;
+    $helo_name = $4;
   }
-  
+
+  # reset the priv data, saving only the helo info
+  my $privdata = "0\x00\x00\x00$helo_name";
+  $ctx->setpriv(\$privdata);
+
   # only increment the aborted_count if have some rowids 
   #   (this means we didn't expect/cause an abort, but something else did)
   if ($rowids > 0) {
@@ -474,6 +542,17 @@ sub abort_callback
   db_disconnect();  # Disconnect, so will get a new connect next mail attempt
   return SMFIS_CONTINUE if ($pass_mail_when_db_unavail);
   return SMFIS_TEMPFAIL;
+}
+
+# Called on connection termination
+#   The only reason we have a close callback is to clear the privdata
+sub close_callback
+{
+  my $ctx = shift;
+
+  # Clear our private data on this context
+  $ctx->setpriv(undef);
+  return SMFIS_CONTINUE;
 }
 
 
@@ -550,21 +629,24 @@ sub envrcpt_callback
   my $rowid;
   my $rowids;
   my $mail_from;
+  my $helo_name;
 
   # Get the stored envelope sender and rowids
   my $privdata_ref = $ctx->getpriv();
   my $rcpt_to = $args[0];
 
   # save the useful data
-  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\Z/) {
+  if (${$privdata_ref} =~ /\A([\d,]+)\x00(.*)\x00(.*)\x00(.*)\Z/) {
     $rowids = $1;
     $mail_from = $2;
+    $helo_name = $4;
   }
   if (! defined $rowids) {
     print "ERROR: Invalid privdata in envrcpt callback!\n";
     print "  PRIVDATA: " . ${$privdata_ref} . "\n";
   }
-  
+
+  print "Stored Helo: $helo_name\n" if ($verbose);
   print "Stored Sender: $mail_from\n" if ($verbose);
   print "Passed Recipient: $rcpt_to\n" if ($verbose);
 
@@ -588,6 +670,7 @@ sub envrcpt_callback
     $relay_ip = $3;
     $relay_maybe_forged = (length($4) > 0 ? 1 : 0);
   }
+  my $helo_name_reversed = reverse($helo_name);
   my $relay_name_reversed = reverse($relay_name);
         
   # Collect the rest of the info for our checks
@@ -600,10 +683,90 @@ sub envrcpt_callback
   my $authtype    = $ctx->getsymval("{auth_type}");
   my $ifaddr      = $ctx->getsymval("{if_addr}");
 
+
+  # Increment the attempted recipient count for this mail client
+  if ($enable_relay_name_updates) {
+    # Don't care if the update fails.
+    $dbh->do("UPDATE relaystats SET rcpt_attempts = rcpt_attempts + 1 WHERE relay_ip = '$relay_ip'");
+  }
+
   print "  Relay: $tmp - If_Addr: $ifaddr\n" if ($verbose);
   print "  RelayIP: $relay_ip - RelayName: $relay_name - RelayIdent: $relay_ident - PossiblyForged: $relay_maybe_forged\n" if ($verbose);
   print "  From: $sender - To: $recipient\n" if ($verbose);
   print "  InMailer: $mail_mailer - OutMailer: $rcpt_mailer - QueueID: $queue_id\n" if ($verbose);
+
+
+  # Store and maintain the dns_name of the relay if we have one
+  #   Not strictly necessary, but useful for reporting/troubleshooting/analysis
+  if ($enable_relay_name_updates) {
+    my $status_flags = 0;
+
+    my $helo_mismatch = 1;
+    my $helo_invalid = 0;
+    my $helo_forged = 0;
+
+    # if helo info was not given, don't need to do any other helo checks
+    if ($helo_name ne "") {
+      # The helo is considered invalid if it is not either a valid IP address or a valid-looking  domain name
+      if ($helo_name =~ /\A(\d+)\.(\d+)\.(\d+)\.(\d+)\Z/) {
+        $status_flags |= HELO_INVALID if ($1 > 255 or $2 > 255 or $3 > 255 or $4 > 255);
+      }
+      # Here we consider names invalid if:
+      #  - All subdomain parts do not start with an alpha character
+      #  - They have dashes or underscores as the first or last char of a subdomain part
+      #  - The rightmost domain part is not fully alpha only or is less than 2 characters
+      #  - Contain any characters other than alphanumerics plus dash, underscore, and dot
+      #  - Do not contain at least 2 domain parts
+      elsif ($helo_name !~ /\A(([a-zA-Z]+|[a-zA-Z0-9]+[\w\-]+[a-zA-Z0-9]+)\.)+[a-zA-Z][a-zA-Z]+\Z/) {
+        $status_flags |= HELO_INVALID;
+      }
+
+      # Only do further helo checks if the helo is not invalid
+      if ($status_flags ^ HELO_INVALID) {
+        # The helo is considered forged if it claims it is us or another machine in our network when it isn't.
+        #   This is practically a certain indicator of a spammer.
+        $status_flags |= HELO_FORGED if ($helo_name eq $ifaddr and $ifaddr ne $relay_ip);
+
+        # The helo is considered a mismatch if a helo was supplied and a dns lookup succeeded and the names
+        #   do not match at least the last two domain parts.  A strong indicator of spam, but not guaranteed.
+        if ($helo_name ne $relay_ip and length($relay_name)) {
+          # check if the dns name is similar to the helo name
+          my @dns_parts = split('\.', $relay_name);
+          my @helo_parts = split('\.', $helo_name);
+          # The names are considered similar if the rightmost two parts match
+          if (lc(pop @dns_parts) ne lc(pop @helo_parts) or lc(pop @dns_parts) ne lc(pop @helo_parts)) {
+            $status_flags |= HELO_MISMATCH;
+          }
+        }
+      }
+    }
+
+    # Build and print the status of the tests
+    if ($verbose) {
+      my $tstr = "";
+      $tstr .= "DNS_MISSING " if (! length($relay_name));
+      $tstr .= "HELO_MISSING " if (! length($helo_name));
+      $tstr .= "DNS_MAYBE_FORGED " if $status_flags & DNS_MAYBE_FORGED;
+      $tstr .= "HELO_INVALID " if $status_flags & HELO_INVALID;
+      $tstr .= "HELO_MISMATCH " if $status_flags & HELO_MISMATCH;
+      $tstr .= "HELO_FORGED " if $status_flags & HELO_FORGED;
+      print "  Flags: $tstr\n";
+    }
+
+    # We insert mail_count,rcpt_count = 1 because if the record didn't exist, it didn't get incremented earlier
+    my $rows = $dbh->do("INSERT IGNORE INTO relaystats (relay_ip,relay_name,helo_name,status_flags,mail_attempts,rcpt_attempts) "
+      . " VALUES ('$relay_ip'," . $dbh->quote($relay_name_reversed) . "," . $dbh->quote($helo_name_reversed) 
+      . ", $status_flags, 1, 1)");
+    goto DB_FAILURE if (!defined($rows));
+    if ($rows != 1) {
+      # Row already exists, so make sure the row is updated with all the latest info
+      my $rows = $dbh->do("UPDATE relaystats SET relay_name = " . $dbh->quote($relay_name_reversed)
+        . ", helo_name = " . $dbh->quote($helo_name_reversed) . ", status_flags = $status_flags"
+        . " WHERE relay_ip = '$relay_ip'");
+      goto DB_FAILURE if (!defined($rows));
+    }
+  }
+
 
   # Only do our processing if the inbound mailer is an smtp variant.
   #   A lot of spam is sent with the null sender address <>.  Sendmail reports 
@@ -716,20 +879,6 @@ sub envrcpt_callback
     }
   }
 
-  # Store and maintain the dns_name of the relay if we have one
-  #   Not strictly necessary, but useful for reporting/troubleshooting
-  if ($enable_relay_name_updates and length($relay_name_reversed) > 0) {
-    my $rows = $dbh->do("INSERT IGNORE INTO dns_name (relay_ip,relay_name) VALUES ('$relay_ip'," 
-      . $dbh->quote($relay_name_reversed) . ")");
-    goto DB_FAILURE if (!defined($rows));
-    if ($rows != 1) {
-      # Row already exists, so make sure the name is updated
-      my $rows = $dbh->do("UPDATE dns_name SET relay_name = " . $dbh->quote($relay_name_reversed)
-        . " WHERE relay_ip = '$relay_ip'");
-      goto DB_FAILURE if (!defined($rows));
-    }
-  }
-
   # Check to see if we already know this triplet set, and if the initial block is expired
   my $query = "SELECT id, NOW() > block_expires, origin_type, relay_ip FROM relaytofrom "
     .         "  WHERE record_expires > NOW() "
@@ -829,7 +978,7 @@ sub envrcpt_callback
     print "  Delaying tempfail reject until eom phase.\n" if ($verbose);
   
     # save that this message needs to be blocked later in the transaction (after eom)
-    $privdata = "00\x00$mail_from\x00$rcpt_to";
+    $privdata = "00\x00$mail_from\x00$rcpt_to\x00$helo_name";
     # Save the changes to our privdata for the next callback
     $ctx->setpriv(\$privdata);
     
@@ -864,6 +1013,13 @@ sub envrcpt_callback
   PASS_MAIL:
   # Do database bookkeeping (if rowid is defined)
   if (defined $rowid) {
+    # Increment the allowed recipient count for this mail client
+    if ($enable_relay_name_updates) {
+      # Don't care if the update fails.
+      $dbh->do("UPDATE relaystats SET rcpt_allowed = rcpt_allowed + 1 WHERE relay_ip = '$relay_ip'");
+    }
+    # FIXME should we only count local recipients?
+
     # We don't increment the passed count here because the mail may still be rejected
     #   for some reason at the sendmail level.  So we do it in the eom callback instead.
 
@@ -891,7 +1047,7 @@ sub envrcpt_callback
     }
   }
   # Save our privdata for the next callback
-  $privdata = "$rowids\x00$mail_from\x00$rcpt_to";
+  $privdata = "$rowids\x00$mail_from\x00$rcpt_to\x00$helo_name";
   $ctx->setpriv(\$privdata);
 
   # FIXME - Should do mail logging?
@@ -905,7 +1061,7 @@ sub envrcpt_callback
   print "ERROR: Database Call Failed!\n  $DBI::errstr\n";
   db_disconnect();  # Disconnect, so will get a new connect next mail attempt
   # set privdata so later callbacks won't have problems (or if db comes back while still in this mail session)
-  $privdata = "0\x00$mail_from\x00";
+  $privdata = "0\x00$mail_from\x00\x00$helo_name";
   $ctx->setpriv(\$privdata);
   return SMFIS_CONTINUE if ($pass_mail_when_db_unavail);
   return SMFIS_TEMPFAIL;
@@ -940,7 +1096,7 @@ sub load_config() {
 my %my_callbacks =
 (
 #	'connect' =>	\&connect_callback,
-#	'helo' =>	\&helo_callback,
+	'helo' =>	\&helo_callback,
 	'envfrom' =>	\&envfrom_callback,
 	'envrcpt' =>	\&envrcpt_callback,
 #	'header' =>	\&header_callback,
@@ -948,7 +1104,7 @@ my %my_callbacks =
 #	'body' =>	\&body_callback,
 	'eom' =>	\&eom_callback,
 	'abort' =>	\&abort_callback,
-#	'close' =>	\&close_callback,
+	'close' =>	\&close_callback,
 );
 
 BEGIN:
