@@ -79,6 +79,9 @@ my $milter_filter_name = 'relaydelay';
 #   definition in the sendmail.mc file.
 my $milter_socket_connection = 'local:/var/run/relaydelay.sock';
 
+# Where the pid file should be stored for relaydelay
+my $relaydelay_pid_file = '/var/run/relaydelay.pid';
+
 # Set this to something nonzero to limit the number of children that the 
 #   milter will spawn.  Since children are never recycled (there seems 
 #   to be a problem doing that with Sendmail::Milter), threads,
@@ -167,7 +170,7 @@ my $check_envelope_address_format = 1;
 my $pass_mail_when_db_unavail = 0;
 
 # Set this to true if you want to try to track locally originated mail
-#   so that replies are not delayed.  This adds several queries to the
+#   so that replies are not delayed.  This adds a couple queries to the
 #   db overhead for each local mail processed, so use with caution.
 #   Also considers mail sent from whitelisted IP's and authenticated
 #   senders as local in case we are acting as a smarthost for them.
@@ -957,6 +960,14 @@ BEGIN:
 
   # Make sure there are no errors in the config file before we start, and load the socket info
   load_config();
+
+  # Record pid to file
+  if (defined $relaydelay_pid_file) {
+    open(PIDF, ">$relaydelay_pid_file") ||
+      die "Unable to record PID to '$relaydelay_pid_file': $!\n";
+    print PIDF "$$\n";
+    close PIDF;
+  }
 
   print "Using connection '$milter_socket_connection' for filter $milter_filter_name\n";
 
