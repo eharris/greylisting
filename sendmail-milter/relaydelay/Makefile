@@ -1,5 +1,5 @@
 SENDMAIL=/export/home/murf/sendmail-8.12.9
-VERSION = 0.8
+VERSION = 0.9
 unam = $(strip ${shell /bin/uname})
 
 ifeq ($(unam),SunOS)
@@ -13,8 +13,8 @@ else
 
 ## found that -lefence dies in mysql_store_results no matter what... so that's not much use for a memory leak.
 
-LIBS=-L/usr/local/lib/mysql -lmilter -lmysqlclient_r  -lpthread -lm -lz -lresolv -lsocket -lnsl
-INCL=-I/usr/local/include/mysql
+LIBS=-L/usr/local/lib/mysql -lmilter -lmysqlclient_r -lpthread -L/usr/local/BerkeleyDB/lib -ldb -lm -lz -lresolv -lsocket -lnsl
+INCL=-I/usr/local/include/mysql -I/usr/local/BerkeleyDB/include
 
 endif
 

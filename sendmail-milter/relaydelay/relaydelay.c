@@ -24,9 +24,11 @@ char *database_pass    = "password";
 char *config_file_name = "/etc/mail/relaydelay.conf";
 
 /* FOR THE ACCESS DB QUERIES */
+
+#ifdef DB_VERSION_MAJOR
 DB *dbp; 
 DBT key, data;
-
+#endif
 
 #define BUFSIZE          4096
 #define SAFESIZ          4095
@@ -261,7 +263,13 @@ int load_config(void)
 		printf("  database_name = %s\n", database_name);
 		printf("  database_host = %s\n", database_host);
 		printf("  database_user = %s\n", database_user);
-		printf("  database_pass = %s\n\n", database_pass);
+		printf("  database_pass = %s\n", database_pass);
+		printf("  milter_socket_connection = %s\n", milter_socket_connection);
+		printf("  sendmail_accessdb_file = %s\n", sendmail_accessdb_file);
+		printf("  relaydelay_pid_file = %s\n", relaydelay_pid_file);
+		printf("  maximum_milter_threads = %d\n", maximum_milter_threads);
+		printf("  reverse_mail_tracking = %d\n", reverse_mail_tracking);
+		printf("  reverse_mail_life_secs = %d (%g hrs)\n\n", reverse_mail_life_secs, (double)(reverse_mail_life_secs)/3600.0);
 		fflush(stdout);
 	}
 	return 0;
@@ -434,12 +442,21 @@ int do_regex(char *pattern,
 void reverse_track(char *mail_from, char *rcpt_to)
 {
 	char query[BUFSIZE];
+	char rcpt_to_copy[BUFSIZE];
 	MYSQL_RES *result;
 	MYSQL_ROW row1,row2;
 	char row_id[32];
-
-	sprintf(query,"SELECT id FROM relaytofrom WHERE record_expires > NOW() AND mail_from = %s AND rcpt_to = %s",
-			rcpt_to, mail_from);
+	
+	if( rcpt_to[0] == '<' && rcpt_to[strlen(rcpt_to)-1] == '>' ) /* wasn't thinking clearly. Should have removed the <> from rcpt_to long ago! */
+	{
+		strcpy(rcpt_to_copy, rcpt_to+1);
+		rcpt_to_copy[strlen(rcpt_to_copy)-1] = 0;
+	}
+	else
+		strcpy(rcpt_to_copy, rcpt_to);
+	
+	sprintf(query,"SELECT id FROM relaytofrom WHERE record_expires > NOW() AND mail_from = '%s' AND rcpt_to = '<%s>'",
+			rcpt_to_copy, mail_from);
 	/* note the reversed from and to fields */
 	
 	if( db_query(query, &result) )
@@ -447,7 +464,7 @@ void reverse_track(char *mail_from, char *rcpt_to)
 	
 	if( !result )
 	{
-		writelog(1,"  reverse_track store_result returned NULL\n");
+		writelog(1,"  reverse_track store_result(1) returned NULL\n");
 		return;
 	}
 
@@ -473,18 +490,12 @@ void reverse_track(char *mail_from, char *rcpt_to)
 	/* # If got here, then need to create a reverse record */
 	sprintf(query,"INSERT INTO relaytofrom \
                    (relay_ip,mail_from,rcpt_to,block_expires,record_expires,origin_type,create_time) \
-                    VALUES (NULL,%s,%s,NOW(),NOW() + INTERVAL %d SECOND,'AUTO',NOW())",
-			rcpt_to, mail_from, reverse_mail_life_secs);
+                    VALUES (NULL,'%s','<%s>',NOW(),NOW() + INTERVAL %d SECOND,'AUTO',NOW())",
+			rcpt_to_copy, mail_from, reverse_mail_life_secs);
 	/* Note again, the reversed from and to fields!  */
 	if( db_query(query, &result) )
 		return;
 	
-	if( !result )
-	{
-		writelog(1,"  reverse_track store_result returned NULL\n");
-		return;
-	}
-
 	if (verbose) 
 	{
 		/* # Get the rowid for the debugging message */
@@ -492,17 +503,16 @@ void reverse_track(char *mail_from, char *rcpt_to)
 			return;
 		if( !result )
 		{
-			writelog(1,"  reverse_track store_result returned NULL\n");
+			writelog(1,"  reverse_track store_result(3) returned NULL\n");
 			return;
 		}
-		
 		row1 = mysql_fetch_row(result);
 		writelog(2,"   fetch_row returns %x\n", row1);
 		
 		if( row1 && row1[0] && strlen(row1[0]) > 0 )
 		{
 			strncpy(row_id, row1[0], sizeof(row_id));
-			writelog(1,"  Reverse tracking row successfully inserted for the recipient (%s) of this mail.  rowid: %s\n", rcpt_to,row_id);
+			writelog(1,"  Reverse tracking row successfully inserted for the recipient (%s) of this mail.  rowid: %s\n", rcpt_to_copy,row_id);
 		}
 	}
 }
@@ -1147,6 +1157,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	  # As strange as it seems, we do not want to bypass the checks if the value is OK or SKIP.
 	  # Only do the access.db checks if the var holding the file name has been defined
 	*/
+#if defined(DB_VERSION_MAJOR)
 	if (sendmail_accessdb_file && strlen(sendmail_accessdb_file)) 
 	{
 		int bypass_checks = 0;
@@ -1287,7 +1298,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		}
 	}
 	
-		
+#endif
 
 	/* 
 	   # Check wildcard black or whitelisting based on ip address or subnet
@@ -1854,20 +1865,34 @@ int main(int argc, char **argv)
 	
 	if( sendmail_accessdb_file && strlen(sendmail_accessdb_file) )
 	{
+#ifdef DB_VERSION_MAJOR
+#if DB_VERSION_MAJOR >= 3
 		if ((ret = db_create(&dbp, NULL, 0)) != 0) 
 		{ 
 			fprintf(stderr, "db_create: %s\n", db_strerror(ret)); 
 			exit (1); 
 		} 
+#endif
         /* the open call below has this many args in 3.3; for later db's it looks like you should insert NULL to be the second arg! */
+#if DB_VERSION_MAJOR == 2
+		if ((ret = db_open(sendmail_accessdb_file, DB_HASH, DB_THREAD|DB_RDONLY, 0444, NULL, NULL, &dbp)) != 0) 
+#endif
+#if DB_VERSION_MAJOR == 3
 		if ((ret = dbp->open(dbp, sendmail_accessdb_file, NULL, DB_HASH, DB_THREAD|DB_RDONLY, 0444)) != 0) 
+#endif
+#if DB_VERSION_MAJOR == 4
+		if ((ret = dbp->open(dbp, NULL, sendmail_accessdb_file, NULL, DB_HASH, DB_THREAD|DB_RDONLY, 0444)) != 0) 
+#endif
 		{ 
+#if DB_VERSION_MAJOR >= 3
+
 			dbp->err(dbp, ret, "%s", sendmail_accessdb_file);
-			
+#endif			
 			exit( 10);
 		}
 		memset(&key, 0, sizeof(key)); 
 		memset(&data, 0, sizeof(data));
+#endif
 	}
 	
 	if( smfi_setconn(milter_socket_connection) == MI_FAILURE )
@@ -1886,12 +1911,12 @@ int main(int argc, char **argv)
 		fprintf(stderr,"Main Returns FAILURE. Filter is not running!\n");
 		exit(10);
 	}
-
+#ifdef DB_VERSION_MAJOR
 	if( dbp )
 	{
 		dbp->close(dbp, 0);
 	}
-	
+#endif
 	db_disconnect();
 }
 
