@@ -247,8 +247,9 @@ int db_query(char *commandbuf, MYSQL_RES **result)
 		if( (res = mysql_query(&global_dbh, commandbuf)) == 0 )
 		{
 			writelog(2,"   Control returns from query:\n");
-			
-			*result = mysql_store_result(&global_dbh);
+
+			if( mysql_field_count(&global_dbh) )
+				*result = mysql_store_result(&global_dbh);
 
 			writelog(2,"   Control returns from store_result:\n");
 		}
@@ -864,8 +865,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			writelog(1,"  Mail delivery is sent from a local interface (%s).  Skipping checks.\n",
 					 if_addr);
 		else
-			writelog(1,"  Mail delivery is sent from a local interface (%s).  Skipping checks.\n",
-					 mail_mailer);
+			writelog(1,"  Mail delivery is sent from a local interface (%s) (ip=%s).  Skipping checks.\n",
+					 mail_mailer, relay_ip);
 		goto PASS_MAIL;
 	}
 
@@ -1038,7 +1039,7 @@ WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND 
 		
 	}
 	strcpy(from_domain,buf2);
-	/* See if this recipient (or domain/subdomain) is wildcard white/blacklisted
+	/* See if this sender (or domain/subdomain) is wildcard white/blacklisted
 	   Do the check in such a way that more exact matches are returned first */
 	if( check_wildcard_mail_from )
 	{
@@ -1104,6 +1105,39 @@ WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) O
 			if( atoi(row[2]) )
 			{
 				writelog(1,"  Whitelisted Sender %s. Skipping checks and passing the mail.\n", mail_from);
+				goto PASS_MAIL;
+			}
+		}
+		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom \
+WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to = '%s' AND (%s) ORDER BY length(mail_from) DESC", 
+				rcpt_to, subquery);
+		if( db_query(query, &result) )
+			goto DB_FAILURE;
+
+		if( !result )
+		{
+			writelog(1,"   store_result call returned null results!\n");
+			goto DB_FAILURE;
+		}
+
+		if( mysql_num_fields(result) != 3 )
+		{
+			writelog(1,"  Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
+			goto DB_FAILURE;
+		}
+
+		row = mysql_fetch_row(result);
+		if( row && row[0] && strlen(row[0]) > 0 )
+		{
+			strncpy(row_id, row[0], sizeof(row_id));
+			if( atoi(row[1]) )
+			{
+				writelog(1,"  Blacklisted Sender->Recipient pair %s->%s. Skipping checks and rejecting the mail.\n",mail_from,rcpt_to);
+				goto DELAY_MAIL;
+			}
+			if( atoi(row[2]) )
+			{
+				writelog(1,"  Whitelisted Sender->Recipient pair %s->%s. Skipping checks and passing the mail.\n", mail_from, rcpt_to);
 				goto PASS_MAIL;
 			}
 		}
