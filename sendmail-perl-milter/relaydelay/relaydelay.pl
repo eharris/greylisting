@@ -472,8 +472,6 @@ sub reverse_track($$$)
   my $mail_from = shift;
   my $rcpt_to = shift;
 
-  print "  IN REVERSE_TRACK\n" if ($verbose);
-
   my $query = "SELECT id FROM relaytofrom WHERE record_expires > NOW() AND mail_from = ? AND rcpt_to = ?";
   my $sth = $dbh->prepare($query) or return;
   # Note the reversed from and to fields! 
@@ -486,8 +484,7 @@ sub reverse_track($$$)
     # There's only one matching row, so if it's auto, and not already unblocked, unblock it.
     my $rows = $dbh->do("UPDATE relaytofrom SET block_expires = NOW() "
       . " WHERE block_expires > NOW() AND origin_type = 'AUTO' AND id = $rowid");
-    print "  Reverse tracking row updated to unblock.  rowid: $rowid\n" if ($verbose and $rows);
-    return;
+    print "  Reverse tracking row updated to unblock.  rowid: $rowid\n" if ($verbose and $rows > 0);
   }
   return if (defined($rowid));
 
