@@ -1,0 +1,923 @@
+<HTML>
+<HEAD>
+<TITLE>The Next Step in the Spam Control War: Greylisting</TITLE>
+</HEAD>
+
+<CENTER><H1>The Next Step in the Spam Control War: Greylisting<BR>
+By Evan Harris</H1>
+<H5>Copyright &copy; 2003, all rights reserved.</H5>
+</CENTER>
+<P>
+
+<H4>Introduction</H4>
+
+This paper proposes a new and currently very effective method of enhancing the 
+abilities of mail systems to limit the amount of spam that they receive and
+deliver to their users.  For the purposes of this paper, we will call this new
+method "Greylisting".  The reason for choosing this name should become obvious
+as we progress.
+<P>
+
+Greylisting has been designed from the start to satisfy certain criteria:
+
+<OL>
+  <LI>Have minimal impact on users
+  <LI>Limit spammers ability to circumvent the blocking
+  <LI>Require minimal maintenance at both the user and administrator level
+</OL>
+
+User-level spam blocking, while somewhat effective has a few key drawbacks that
+make its use in the continuing spam war undesirable.  A few of these are:
+
+<OL>
+  <LI>It provides no notice to the senders of legitimate email that is falsely
+      identified as spam.
+  <LI>It places most of the costs of processing the spam on the receivers side
+      rather than the spammers side.
+  <LI>It provides no real disincentive to spammers to stop wasting our time 
+      and resources.
+</OL>
+
+As a result, Greylisting is designed to be implemented at the MTA level, where 
+we can cause the spammers the most amount of grief.
+<P>
+
+For the purposes of evaluating and testing Greylisting, an example implementation 
+has been written of a filter that runs at the MTA (Message Transfer
+Agent) level.  The source for this example implementation is available as 
+a link below, and as other implementations or additional utility code
+become available, they will also be linked.
+<P>
+
+Greylisting has been tested on a few small scale mail hosts (less than 100 users,
+though with a fairly diverse set of senders from all over the world, and volumes
+over 10,000 email attempts a day), however it is designed to be scalable, as well
+as low impact to both administrators and users, and should be acceptable
+for use on a wide range of systems, including those of very large scale.
+Of course, performance issues are very dependent on implementation details.
+<P>
+
+The Greylisting method proposed in this paper is a complementary method to other
+existing and yet-to-be-designed spam control systems, and is not intended 
+as a replacement for those other methods.  In fact, it is expected that spammers 
+will eventually try to minimise the effectiveness of this method of blocking, 
+and Greylisting is designed to limit options available to the spammer when 
+attempting to do so.
+<P>
+
+The great thing about Greylisting is that
+the only methods of circumventing it will only make other spam control 
+techniques just that much more effective (primarily DNS and other methods 
+of blacklisting based on IP address) even after this adaptation by the 
+spammers has occurred.
+<P>
+
+
+<P><H3><CENTER>The Greylisting Method</CENTER></H3>
+
+  <H4>High Level Overview</H4>
+
+Greylisting got it's name because it is kind of a cross between black- and 
+white-listing, with mostly automatic maintenance.  A key element of the 
+Greylisting method is this automatic maintenance.
+<P>
+
+The Greylisting method is very simple.  It only looks at three pieces of
+information (which we will refer to as a "triplet" from now on) about any 
+particular mail delivery attempt:
+
+<OL>
+  <LI>The IP address of the host attempting the delivery
+  <LI>The envelope sender address
+  <LI>The envelope recipient address
+</OL>
+
+From this, we now have a unique triplet for identifying a mail "relationship".
+With this data, we simply follow a basic rule, which is: 
+<P>
+
+<BLOCKQUOTE>
+If we have never seen this triplet before, then refuse this delivery and 
+any others that may come within a certain period of time with a temporary 
+failure.
+</BLOCKQUOTE>
+<P>
+
+Since SMTP is considered an unreliable transport, the possibility 
+of temporary failures is built into the core spec (see RFC 821).  As such, any 
+well behaved message transfer agent (MTA) should attempt retries if given 
+an appropriate temporary failure code for a delivery attempt (see below for
+discussion of issues concerning non-conforming MTA's).
+<P>
+
+During the initial testing of Greylisting, it was observed that the vast majority 
+of spam appears to be sent from applications designed specifically for spamming.
+These applications appear to adopt the "fire-and-forget" methodology.  That is, 
+they attempt to send the spam to one or several MX hosts for a domain, but then 
+never attempt a true retry as a real MTA would.  From our testing, this means that 
+currently, based on a fairly conservative interpretation of testing data,
+we see effectiveness of over 95%, and that is with no legitimate mail ever 
+being permanently blocked.
+<P>
+
+This blocking comes with a minimal price from the terms of local resources.
+Assuming the use of a local datastore for the triplet and other metadata, 
+there is no required network traffic caused by Greylisting 
+other than that associated with the connection itself.  Since we are not checking
+the contents of the message at all there is very little processing overhead,
+unlike many other spam blocking methods.
+<P>
+
+There is one effect that could be seen as either a positive or negative.
+Since the Greylisting method delays acceptance of unknown mail, that will 
+generate a little more work for the sending MTA of legitimate mail. 
+The flip side is that it generates a lot more work and smarts for the 
+spammer's systems, hopefully enough to make the costs of spamming higher, 
+possibly even to the point of making spamming unprofitable for some of them.
+<P>
+
+The best part is that since we never permanently fail a message delivery,
+as long as the delivering MTA's are well behaved, we should never cause a 
+legitimate mail to bounce.  There should never be a false positive!
+<P>
+
+
+  <H4>Implementation Specification</H4>
+
+In order to implement the Greylisting method, we will use some form of database 
+to hold a few pieces of information about a specific mail relationship that is
+keyed off of the triplet described above:
+
+<UL>
+<LI>The time that the triplet was first seen (record create time)
+<LI>The time that the blocking of this triplet will expire
+<LI>The time that the record itself will expire (for aging old records)
+<LI>The number of delivery attempts that have been blocked
+<LI>The number of emails we have sucessfully passed
+</UL>
+
+(Note: There are some additional pieces of information that are stored and used 
+in the example implementation, and they will be discussed later, but for now
+we will disregard them.  Also, the number of email attempts blocked and passed
+is not strictly necessary, but will be shown to be useful in making the process 
+work better.)
+<P>
+
+With this data, we have everything necessary for a fully functional Greylisting 
+implementation.
+<P>
+
+The proper place in the SMTP session to perform our checks is as soon as possible 
+in the mail session when we have all of the needed information available.
+To remind those who are not familiar with the low level details of an SMTP session,
+a normal command sequence would look something like:
+<BR>
+
+<PRE>
+-&gt; HELO somedomain.com
+&lt;- 250 Hello somedomain.com
+-&gt; MAIL FROM: &lt;sender@somedomain.com&gt;
+&lt;- 250 2.1.0 Sender ok
+-&gt; RCPT TO: &lt;recipient@otherdomain.com&gt;
+&lt;- 250 2.1.5 Recipient ok
+-&gt; DATA
+&lt;- 354 Enter mail
+   ...
+&lt;- 250 2.0.0 Message accepted for delivery
+</PRE>
+
+This means, in order to minimize the network traffic required when a mail delivery 
+may be rejected we should perform our checks as soon after the sending MTA has 
+given us all the required information, which is to say, immediately after the 
+RCPT command is received.
+<P>
+
+In the case where we would temporarily fail a particular delivery attempt, the mail 
+transaction would look similar to this:
+<BR>
+
+<PRE>
+-&gt; MAIL FROM: &lt;sender@somedomain.com&gt;
+&lt;- 250 2.1.0 Sender ok
+-&gt; RCPT TO: &lt;recipient@otherdomain.com&gt;
+&lt;- 451 4.7.1 Please try again later
+</PRE>
+
+One additional feature which has not yet been mentioned is the provision for some
+method to allow manual whitelisting of relays, recipients, and possibly even 
+senders.  
+<P>
+
+This manual whitelisting capability is not strictly necessary, but for 
+several reasons, a minimum implentation 
+pretty much requires at least manual whitelisting based on IP address for things like 
+localhost, or primary/backup MX hosts for the domains being handled.  Since those
+relays are presumably smart enough to retry, and should never be blocked anyway,
+there is little point to delaying mail delivery attempts from them.
+<P>
+
+Likewise, whitelisting recipients (or recipient domains) may be useful in an
+ISP or similar setting, where particular customers wish to exempt their domains
+from the possible mail delivery delays that Greylisting may cause.
+<P>
+
+Whitelisting based on sender address (or sender domain), while easily implemented, 
+is discouraged.  The reasons for this are that in most cases, whitelisting the IP 
+addresses of the mail hosts that send for a particular domain is a much better 
+solution because it is much more difficult to forge the IP address than the sending 
+email address.  Also, in most cases, domains or emails that would be likely to be 
+whitelisted would also be very easily guessed or discovered, and spammers could 
+take advantage of that to bypass the Greylisting blocks.
+<P>
+
+Whether these manual whitelisting entries are stored in the database, or are
+hardcoded into the application does not matter from the standpoint of Greylisting.
+But of course, an implementation that allows them to be easily updated is
+preferable.
+<P>
+
+The specific methodology for a fairly basic Greylisting implementation
+is as follows:
+
+<OL>
+<LI>Check if the sending relay (or network) is whitelisted, and if so, pass the mail.
+<LI>Check if the envelope recipient (or domain) is whitelisted, and if so, pass the mail.
+<LI>Check if we have seen this email triplet before.
+  <OL>
+  <LI>If we have not seen it, create a record describing it and return a tempfail to the sending MTA.
+  <LI>If we have seen it, and the block is not expired, return a tempfail to the sending MTA.
+  <LI>If we have seen it, and the block has expired, then pass the email.
+  </OL>
+<LI>If the delivery attempt should be passed and the delivery is successful:
+  <OL>
+  <LI>Increment the passed count on the matching row.
+  <LI>Reset the expiration time of the record to be the standard lifetime past the current time.
+  </OL>
+<LI>If the delivery attempt has been temporarily failed:
+  <OL>
+  <LI>Increment the failed count on the matching row.
+  <LI>If the sender is the special case of the null sender, do not return a 
+      failure after RCPT, instead wait until after the DATA phase.
+  </OL>
+</OL>
+
+(Note: For all checks, we ignore records whose lifetime has expired)
+<P>
+
+
+  <H4>Issues Affecting The Proposed Implementation</H4>
+
+There are a few issues that were found to be prevalent enough "in the wild" to make it 
+necessary to slightly modify methods in the basic approach.
+<P>
+
+One issue is that some MTA software 
+(<A HREF="http://www.exim.org/exim-html-4.10/doc/html/spec_37.html#SECT37.10">Exim for example</A>)
+attempts to limit the problem of forged sender addresses by attempting to verify that 
+the claimed sender of an email is a valid address by doing an SMTP callback before accepting 
+mail.  Since it is desired to minimize the traffic when a mail may be rejected temporarily,
+the best course of action would be to issue a tempfail after the RCPT command.  However, 
+in the case of a SMTP callback, doing so at that point may cause our outgoing mail 
+to be delayed unnecessarily.
+<P>
+
+Luckily, the mailers that do this use a sender address of the null sender "&lt;&gt;"
+to perform this check.  This makes it fairly simple to workaround, since we
+can make a modification to the handling process so that 
+in the special case of the null sender, we delay returning a temporary failure 
+until after the DATA phase of a mail transaction.  Since SMTP callbacks abort their 
+test delivery attempt before getting to the data phase, the SMTP callback 
+will succeed, and the outgoing mail should be accepted with no delay.
+<P>
+
+Another issue occurs when a large organization uses a pool of outbound mail 
+servers for sending email to a system using Greylisting.  If the pool is 
+configured so that the same mailserver (with the same IP) will always retry 
+deliveries for a particular mail, there is no issue.
+<P>
+
+But if that pool of mail servers happens to be configured in such a way that subsequent delivery
+attempts for a particular mail may be made from any one of several sending MTAs,
+then we have a possibility where legitimate mail deliveries may take significantly 
+longer than expected.  The possible maximum delay is dependant on the number
+of MTAs in the sending pool, and if the distribution of the retry attempts is
+random or deterministic.  In a worst-case scenario, it is even possible that mail 
+may be delayed long enough to cause it to bounce.
+<P>
+
+Other than adding a manual entry for
+networks of this type, one proposed method of dealing with this issue is to
+perform the IP address checks of the sending relay based on the subnet they
+are at rather than the specific IP.  Since most of the sites that do this 
+have most or all of their email servers on the same /24 subnet, this method
+works well in avoiding this issue without requiring manual intervention, at
+the expense of making it a little easier for spammers to circumvent the 
+system.
+<P>
+
+One other potential issue is with mailing lists that use unique envelope
+sender addresses for mail sent to an end user, which is useful in order to 
+better track bounces, since the formatting of bounces is not codified, and it 
+is fairly common for mailers to return bounces that are formatted in such a way
+that it is very difficult, or even impossible, to programmatically discover
+which address caused the bounce.
+<P>
+
+This method of handling bounces is called VERP for Variable Envelope Return 
+Paths, and one method of doing this is detailed 
+<A HREF="http://cr.yp.to/proto/verp.txt">here</A>. 
+Luckily, most mailing lists do this in a way similar to that described in that
+document, which is to use the same unique envelope sender for every mail sent to a
+particular recipient.
+<P>
+
+However, some mailing lists also try to track bounces to individual mails, rather 
+than just individual recipients, which creates a variation on the VERP method where 
+each email has it's <I>own unique</I> envelope sender.  Since the automatic whitelisting 
+that is built into Greylisting depends on the envelope addresses for subsequent 
+emails being the same, 
+this will cause each email sent to be delayed, rather than just the first email.
+<P>
+
+There is a simple workaround, which is to manually whitelist any hosts that deliver 
+this sort of traffic.  But luckily, even without manual whitelist entries, the 
+impact is not that significant since mailing lists are usually not that timely 
+in their delivery anyway, and the delay will generally not be very significant for
+most users.
+<P>
+
+
+  <H4>Basic Configuration Parameters</H4>
+
+In the spirit of giving the mail system administrators who choose to implement
+Greylisting as much choice as possible, there are several options which should 
+be easily modified in order to tune the behavior of the Greylisting method on a 
+per-case basis.  Below, we detail these options, and some details to keep in 
+mind if it is deemed necessary to change them from the default suggested values.
+<P>
+
+As a matter of fact, it may be desirable to vary these settings from installation
+to installation, since it will help keep the spammers guessing.
+<P>
+
+Initial delay of a previously unknown triplet: 1 Hour<BR>
+Lifetime of triplets that have not yet allowed a mail to pass: 4 Hours<BR>
+Lifetime of auto-whitelisted triplets that have allowed mail to pass: 36 Days<BR>
+<P>
+
+The initial delay of 1 hour was picked for several reasons:
+
+<OL>
+<LI>An hour is short enough that in most cases, users will not notice the delay.
+<LI>It is long enough to give time for administrators on a possibly compromised 
+or abused mail server to discover the problem and hopefully correct it, before
+any of the offending email is able to be delivered.
+<LI>It is long enough to provide a good chance that if the sending host is in 
+fact a spammer, they will be listed in other IP-based blacklists that may be used 
+in conjunction with Greylisting, so that even if a spamming relay later attempts a 
+redelivery that would no longer be delayed by Greylisting, it may still be blocked 
+by other methods.
+<LI>It is also long enough that other types of traffic analysis could be designed
+and implemented such that spamming IP's could be easily identified and blocked by
+other methods, in such a way that even the first recipients (before a spamming
+pattern starts to emerge) would still not be bothered by the spam email.
+</OL>
+<P>
+
+The data collected during testing showed that more than 99% of the mail 
+that was blocked with the tested setting of 1 hour would still have been blocked 
+with a delay setting of only 1 minute.  However, it is expected that as 
+spammers become aware of this blocking method, they will change their software
+to retry failed deliveries.  At that point, having a larger initial delay
+will definitely help, as it gives time for other blocking methods to act.
+For this reason, it is suggested that at least a one hour delay value be kept
+as a default, since spammers will start adapting as soon as this method becomes
+known and starts being used.
+<P>
+
+It is important to keep this delay smaller than a value where a significant
+number of MTA's will give up and bounce the message.  Luckily, most MTA's have
+failure timeouts of several days.  However, there are some special cases like
+certain financial institutions who want to know that it wasn't delivered in 
+a fairly short period of time.  Even in these special cases, the timeouts should
+be at least a few hours.
+<P>
+
+It is likely that some form of traffic analysis will be developed using the data from
+a Greylisting database in order to automatically identify the IP addresses of hosts 
+that are attempting to deliver spam.  
+<P>
+
+While this sort of functionality is not currently 
+included in the example implementation, I would be very interested in seeing this come 
+about, since spammer patterns were usually very identifiable after a few minutes, 
+mainly due to many nearly simultaneous delivery attempts to a large number of different
+recipients from ethe same IP address or group of IP addresses, from which no (or very little)
+previous traffic had ever been observed.
+(If the organizers or maintainers of any of the DNS blacklists are interested in creating
+an automatic way of using this data to help update their lists, please contact me.)
+<P>
+
+Unfortunately, pattern analysis requires a fairly high level of traffic to be useful
+and accurate, so smaller systems will probably not help much unless the pattern 
+analysis is distributed, which is difficult when you can't necessarily trust 
+other potential collaborators.
+<P>
+
+
+The 4 hour initial life of records was picked because:
+
+<OL>
+<LI>Almost all legitimate mail servers have a retry time that is less than this.
+<LI>Having a small lifetime helps limit the number of relevant records that may
+have to be considered and maintained for very busy sites that may have enormous
+amounts of mail traffic and hundreds or thousands of queries a second.  Small
+values for this are increasingly important as the spam problem grows, since each
+unique spam triplet will generate a record.
+<LI>It was desired to keep the time window fairly small to limit when a possible 
+spam might get through because a spammer may try to resend the message to their
+entire delivery list.
+</OL>
+<P>
+
+(Note that in the example implementation, this 4 hour limit includes the initial
+1 hour delay, which means the effective window when an email will be accepted
+is 3 hours.)
+<P>
+
+There is another reason why this delay should be a small as possible.  If
+a spammer discovers and uses a poorly maintained relay host, hopefully it will 
+bog that relay down enough so that it gets very slow.  That increases the 
+possibility that the relay will be slowed down enough that it won't be able to
+process the queue fast enough for the spam to get through within this time
+window.
+<P>
+
+
+The lifetime limit of whitelisted records is updated every time an email is 
+successfully passed, and was chosen to be 36 days to:
+
+<OL>
+<LI>Help keep the database a manageable size by allowing entries for obsolete
+senders, recipients or relays to be aged off gracefully.
+<LI>Make sure that records live long enough to avoid delaying subsequent mailings 
+that may only come once a month (i.e. monthly mailing list notifications).  Also,
+to live long enough for monthly mailings that may be sent only on a particular 
+day of the week (for example, the first Monday of the months June and July in
+2003 are 35 days apart).
+</OL>
+<P>
+
+
+<P><CENTER><H3>Analysis of Effectiveness</H3></CENTER>
+
+
+Based on testing with the example implementation, over a testing period
+of about 6 weeks, we had raw numbers of:
+
+<UL>
+  <LI>Unique triplets seen: 346968
+  <LI>Unique triplets that passed email: 8950
+  <LI>Effectiveness (based on triplets): 97.4%
+</UL>
+<P>
+
+So we have a better than 97 percent efficiency assuming that <I>all</I> email
+is spam, but it's actually better than that, since most of the
+email that got through was not spam.  Unfortunately, telling exactly how much
+better we did is impossible without individually inspecting each email,
+which of course we did not do.
+<P>
+
+Now lets look at our inefficiency:
+<P>
+
+<UL>
+  <LI>Total emails passed: 85745
+  <LI>Total deliveries deferred where email was eventually passed: 33586
+  <LI>Percentage of emails delayed: 39.2%
+</UL>
+<P>
+
+Unfortunately, this is a pretty poor number.  But let's correct it a bit.
+Almost all of these delayed emails were mailing list traffic which used
+a unique id for the sender address (see above note regarding VERP).
+So if we disregard all triplets that passed only one email, we should
+exclude that type of traffic, and we get a new set of numbers:
+<P>
+
+<UL>
+  <LI>Total emails passed: 85745
+  <LI>Total deliveries deferred where more than one email was eventually passed: 3512
+  <LI>Percentage of emails delayed (adjusted): 4.1%
+</UL>
+<P>
+
+This puts things in a much more favorable light, and merely disregards delays for 
+emails that are generally not timely anyway.
+<P>
+
+Now let's see what effect greylisting would have on network bandwidth,
+based on some general averages.
+<P>
+
+<UL>
+  <LI>Average size of spam emails: 5000 bytes
+  <LI>Average SMTP delivery attempt overhead: 500 bytes
+</UL>
+<P>
+
+These numbers are based on spam collected via various methods before the
+testing period.  We picked these as nice round numbers that are pretty 
+closely in line with analysis of previously seen spam.  As for the SMTP
+overhead, in most cases it was less than 500 bytes, but we decided to 
+err on the conservative side.
+<P>
+
+From this, it follows that for every spam blocked using Greylisting, we save 
+enough bandwidth to "pay" for 10 deferred delivery attempts.
+If we total that up to give a real-world number 
+(using the unadjusted numbers to give a worst case picture):
+<P>
+
+338018 (# spams) x 5000 bytes = 1.69 Gbytes of bandwidth saved<BR>
+33586 (# blocks) x 500 bytes = 16.7 Mbytes of bandwidth wasted
+<P> 
+
+This gives us a net gain of over 1.67 Gbytes of traffic that was saved by
+implementing Greylisting in our tests.  And that's just on a fairly small site.
+<P>
+
+
+
+<P><CENTER><H3>Suggestions for more effective protection of email domains</H3></CENTER>
+
+Greylisting will not be nearly as effective against spam unless <I>ALL</I> of 
+the MX hosts for a particular domain use mail software that incorporates it.
+<P>
+
+A fair number of spamming software packages are already smart enough to retry
+delivery to other MX hosts for a domain if delivery through one MX fails.
+Since presumably all MX hosts will be whitelisted for each other (what is the
+point to delaying acceptance of email from a host that you <I>know</I> is 
+a real MTA that will retry?) if the spammers can deliver to one of the MX's
+without a delay, then you have no more protection than you did before.
+<P>
+
+In addition, Greylisting, while already having a fairly minimal negative 
+impact, can be made less intrusive if all of the MX hosts use a common 
+database for tracking delivery attempts.
+To illustrate this, lets take an example where we have several hosts listed as
+mail exchangers for a domain, with seperate Greylisting databases.
+<P>
+
+A legitimate sending relay with a retry time of an hour attempts to deliver to one
+of the listed MX hosts.  This host has never seen this triplet before, 
+and so it generates a record in its own Greylisting database for the triplet,
+and refuses to accept the mail.  An hour passes, and the sending MTA knows that 
+the last attempt to deliver failed, so it decides not to retry delivery to the 
+same MX host, and so it picks a different one and tries to deliver to it.  
+This new MX host it picked is using a seperate database, and it does not know 
+about the past attempt, and since it has not seen the triplet, it generates a 
+new record in its own database for it, and refuses delivery again.
+<P>
+
+From this example, it can be seen fairly easily that there is the possibility 
+that the delay in delivery of a legitimate piece of mail may get significantly 
+longer than expected if there are enough MX hosts in the mix, even to the point 
+that the sending server may give up and bounce the mail.
+<P>
+
+To avoid this possible problem, it is <I>STRONGLY</I> suggested that when there 
+is a case of multiple MX hosts for a domain, they should all use a common 
+database for tracking the mail triplets.  There may be cases when the MX hosts are
+too widely seperated (network-wise) to be able to do this efficiently and 
+robustly, but even in those cases it is possible that Greylisting will still be 
+useful enough that this example worst-case scenario can tolerated or worked
+around to minimize the impact.
+<P>
+
+
+<P><H3><CENTER>Common spammer attack methods</CENTER></H3>
+
+This section details a few of the most prevalent spammer attack methods 
+that were observed during the testing period, and how the Greylisting system 
+deals with them.
+
+
+  <H4>Method 1: The non-primary MX attack</H4>
+
+A significant number of spam emails specifically target non-primary MX hosts for 
+domains, for the simple reason that backup MX servers will usually accept and relay 
+all of the spam to the primary MX host without checking it, which reduces the load 
+on the spammers system, requires little or no additional processing for mails
+that are rejected, and usually results in faster delivery transactions because
+the receiving system has to do less work (in the short term while the attack
+is occuring).
+<P>
+
+Greylisting handles this attack very well, since the whole point of the attack
+is to minimize bounces and delivery delays.
+<P>
+
+
+  <H4>Method 2: The spam troll/Dictionary attack</H4>
+
+Many spammers are now resorting to "trolling", that is, sending spams to common 
+usernames (tom@, harry@) at domains (also known as a dictionary attack), or 
+sending to generated usernames made from real names harvested from other 
+sources.  They usually seem to be operating from
+a dictionary of common user names, but the "generated" usernames tactic  
+may be getting more common.
+<P>
+
+The spammers probably use this method in order to reach people who have either
+taken steps to try to keep their email address from being harvestable from the web,
+or who are fairly novice users that may not have the resources or inclination
+to create their own web pages.  Probably the latter case, since novice users 
+are probably more likely to purchase something that has been advertised through spam.
+<P>
+
+This type of attack is very often
+combined with the non-primary MX attack, since most of these emails will result 
+in bounces on domains that don't have a fairly large user population.
+Consequently, the spammers target the backup MX hosts.  That way, they don't have 
+to handle all the bounces and failures that these messages generate.
+<P>
+
+Greylisting handles these very well, since they almost always come
+from random short-lived dynamic IP addresses.  And because most of these emails 
+will ultimately generate bounces, it is costly for spammers to attempt 
+redelivery of this type of attack.  Also, since this attack is
+so distinctive (A high number of bounces generated in a short period of time from 
+a particular IP address
+or set of addresses), it should be very easy to recognize and add to other
+blacklisting methods if given enough time to do so, which Greylisting provides.
+<P>
+
+
+  <H4>Method 3: The organized distributed attack</H4>
+
+Many spammer attacks seem to come in a pattern that looks very much like a 
+moderated DDOS (Distributed Denial Of Service), lets call this type of 
+spamming an "Organized Distributed Spammer Attack" (ODSA).
+<P>
+
+On the systems where spammer methods were evaluated, it was observed to be 
+fairly common that there were spam 
+delivery attempts that happened in a fairly short window of time, where the
+SMTP connections were originating from many different and seemingly unrelated
+IP addresses.  Yet all of the envelope sender addresses were the same or
+similar, and the envelope recipient addresses were fairly sequential.
+<P>
+
+Obviously, Greylisting (as defined here) currently handles these attacks extremely well.
+However, if (when) the spammers adapt and learn to retry the delivery attempts, 
+it may not be as effective by itself.
+<P>
+
+That being said, it is quite possible to adapt the Greylisting method to 
+help thwart the described workaround.  For example, at the cost of a little 
+additional processing, it should be fairly simple to look at delivery 
+attempts that have happened in a fairly recent time period, and after the 
+first few attempts have been seen, submit all of the relays exhibiting this 
+behavior to various blacklists as probable spam sites.
+<P>
+
+
+  <H4>Method 4: The web proxy attack</H4>
+
+A significant portion of spam seems to come from relays that appear to be
+CacheFlow Server or other types of proxies.  These can usually be 
+identified by returning "CacheFlowServer" to an ident probe.
+<P>
+
+Greylisting will block these particular attacks completely, since those
+servers are not "real" MTA's, and will never retry.
+<P>
+
+
+
+<P><H3><CENTER>Possible methods of spammer adaptation</CENTER></H3>
+
+Greylisting as proposed is fairly immune to possible routes of adaptation by 
+spammers to get around the blocking.  The possible methods of adaptation may 
+make Greylisting by itself less effective, but the ways of getting around it 
+will only make other spamblocking methods more effective.
+<P>
+
+The normal spammer behavior is to change IP's when normal IP blacklists
+have listed their current IP.  Unfortunately for the spammers, changing their
+IP does not help with our delaying method, as every mail (and it's delay) is 
+tied to the IP address of the sending relay.  If the IP address changes, it
+effectively "resets" the timer on the delay, even if the envelope sender and
+recipient addresses stay exactly the same.
+<P>
+
+The other adaptation that is expected will result in the current versions of 
+client spam software becoming obsolete, since most of those spamming applications 
+are not intelligent enough to retry a delivery after getting any type of error.  
+Spammers will be required to either use more intelligent software that retries, 
+or to relay through smart relays.
+<P>
+
+We may see spammers gravitate toward using open third party relays, but most of them
+are already locked down or are quickly becoming so.  Or, they may setup their 
+own relays.  In either case, it does nothing to negate the likelihood that 
+those relays are or will quickly become listed in blacklists, thereby
+reducing their effectiveness for sending spam.  
+<P>
+
+If spammers setup their own relays, the fact that email transmissions are delayed
+and that they may each take several attempts to deliver, only increases the
+storage and bandwidth requirements on the spammers side, which also raises the 
+costs to the spammer.  And if we can make it less profitable, then we are well
+on the way to solving the spam problem.
+<P>
+
+
+<P><H3><CENTER>Implementation Caveats</CENTER></H3>
+
+The delaying tactic that is the core of Greylisting may cause undesired delays 
+if the host it is running on allows clients that will be using regularly changing 
+IP's to relay mail through it.  For example, if clients on non-local networks are 
+allowed to relay through the server after doing a POP or IMAP auth, this 
+implementation does not handle allowing these clients to deliver their mail 
+for forwarding without incurring a probably undesired delay.
+<P>
+
+Workarounds for this issue exist, but are not implemented in the example code.
+Essentially all that is necessary to allow this without incurring a delay penalty
+is to simply insert a short-lived record into the Greylisting database at the 
+same time that authorized relaying is enabled, which allows that originating IP 
+address the ability to send mail for some small but sufficient amount of time.
+<P>
+
+Reception of mails from legitimate hosts that either do not pay attention to the 
+temporary failure nature of the rejections, or never attempt any retries will
+be adversely affected by this system.  Hopefully, any mailers that have these 
+problems will be quickly fixed once Greylisting has been implemented at a 
+significant number of sites.
+<P>
+
+Unfortunately, a few isolated systems with these issues have been discovered 
+during testing.  The affected systems either do a poor job of following the SMTP spec, 
+or are outright violating it.  Since SMTP is by nature an unreliable transport method,
+systems that do not retry deliveries are poorly advised and need to be fixed.
+<P>
+
+An SMTP session log generated by one specific example of a non-compliant MTA 
+follows:
+
+<PRE>
+-&gt; HELO somedomain.com
+&lt;- 250 Hello 
+-&gt; MAIL FROM: &lt;sender@somedomain.com&gt;
+&lt;- 250 2.1.0 Sender ok
+-&gt; RCPT TO: &lt;recipient@otherdomain.com&gt;
+&lt;- 451 4.7.1 Please try again later
+-&gt; DATA
+&lt;- 551 No valid recipients
+</PRE>
+
+From this, it is fairly obvious that the sending MTA did not check the status
+from the RCPT command, and continued on to issue DATA, which caused a permanent
+failure code to be issued, which is not a valid step when no recipients addresses
+have been accepted.  In the case of this particular mailer, it did pay attention
+to the later 551 error code, which is considered a "permanent" failure code. 
+This caused the message to be bounced back to the 
+sender.  But that is incorrect behavior because it failed to observe the 
+earlier "temporary" failure and abort the transaction at that point.
+<P>
+
+
+<P><H3><CENTER>An Example Implementation</CENTER></H3>
+
+The provided example implementation (<A HREF="source/">available here</A>) is a perl based 
+milter for <A HREF="http://www.sendmail.org/">Sendmail</A>, using version 0.18 of the 
+<A HREF="http://sourceforge.net/projects/sendmail-milter/">Sendmail::Milter</A> 
+interface (also available from <A HREF="http://www.cpan.org/">CPAN</A>)
+and has been tested with Sendmail 8.12.9, though it should work with all versions 
+of sendmail after 8.12.5.  Sendmail::Milter requires a threaded perl installation 
+and was tested with perl 5.8.0 (available from <A HREF="http://www.perl.org/">perl.org</A>
+or from CPAN).
+<P>
+
+Also available are database definitions used for this implementation,
+and a sample configuration file.  Since the implementation
+is in perl, it is easily modifiable.  Not available on CPAN (yet...).
+<P>
+
+The database used was <A HREF="http://www.mysql.com/">Mysql</A> 3.23.54, though it should 
+work with any later version, and most likely will work with earlier versions as well.  
+In addition, the test systems were also using <A HREF="http://www.ijs.si/software/amavisd/">amavisd-new</A> 
+with the amavisd-new-milter interface, which was configured to do additional spamblocking
+with the help of <A HREF="http://www.spamassassin.org/">Spamassassin</A> 2.53.
+<P>
+
+In the interests of keeping the example implementation simple and easy to understand,
+some features that could easily be optimized have been left in their unoptimized
+state.  Even so, during testing under heavy spam loads, the added time for the checks
+was unnoticeable in most cases, and in the remaining cases, the cause was due
+to network delays accessing the database (which was remotely hosted).
+<P>
+
+One detail of the implementation will probably strike horror in the hearts of 
+diehard "structured" programmers.  In several places, <I>goto</I> is used.  Because
+if the way that the milter interface works, this seemed more straightforward than
+other methods.
+<P>
+
+  <H4>Other details on the example implementation</H4>
+
+Successful mails that have an envelope sender of the null sender are considered
+a special case where we will expire the record immediately in order to avoid 
+whitelisting it, once we allow the mail to go through.  Mails from the null 
+sender are (according to RFC 821) only to be used for special administrative 
+mails like bounces.  Consequently, they are almost never used for more than 
+one legitimate email.  For that reason, there is no need to maintain them 
+any longer once an email has been passed.
+<P>
+
+Unfortunately, many spammers are misusing this sender address because it 
+generally won't generate a bounce from the recipient server (there's no 
+point in generating a bounce message for a mail that is already a bounce).
+Expiring these records immediately helps limit the possibility that 
+spammers using this sender address incorrectly can send multiple spams
+to the same recipient in a small time frame.
+<P>
+
+In addition, there are several other small features incorporated into the 
+example implementation that are not part of the Greylisting system itself, 
+but are attempts at enhancing or refining the general purpose of spam
+blocking.
+<P>
+
+The database layout used is not normalized.  This was a conscious choice  so 
+that people who may
+not be that familiar with database design could more easily understand it.
+However, reworking the database implementation to normalize it should be 
+fairly trivial.
+<P>
+
+One thing that is not incorporated is any kind of database maintenance.  There
+is no provided method of inserting manual whitelisting entries other than the
+example sql statements in the above dbdef.sql file.  I expect that eventually
+a nice web cgi for maintaining the database will be written, but haven't had time
+to create one yet.  Or maybe someone will create one and share it.
+<P>
+
+
+<P><H3><CENTER>Links to Example Source and Information</CENTER></H3>
+
+To contact me about this project, please send email to <A HREF="mailto:eharris@puremagic.com">eharris@puremagic.com</A>
+<P>
+
+All of the example implementation files and information should be
+<A HREF="source/">here</A>.  If there's something missing, let me know.
+<P>
+
+More to come...
+<P>
+
+<P><H3><CENTER>Credits</CENTER></H3>
+
+<form action="https://www.paypal.com/cgi-bin/webscr" method="post">
+If you have a Paypal account and found this idea, project or code useful, please make a donation so that we
+can have more time for development.  Plus, it helps buy beer!
+  <input type="hidden" name="cmd" value="_xclick">
+  <input type="hidden" name="business" value="eharris@puremagic.com">
+  <input type="hidden" name="item_name" value="Greylisting">
+  <input type="hidden" name="no_note" value="1">
+  <input type="hidden" name="currency_code" value="USD">
+  <input type="hidden" name="tax" value="0">
+  <input type="image" src="https://www.paypal.com/images/x-click-but21.gif" border="0" name="submit" alt="Donate!">
+</form>
+
+Thanks to the following people for providing valuable feedback and
+trying to shoot my theories full of holes:
+
+<UL>
+<LI>Brad Roberts
+<LI>Brian Michalk
+<LI>Corey Huinker
+<LI>Bob Apthorpe
+</UL>
+<P>
+
+Thanks to Paul Graham, whose paper on Bayesian filtering caused a revolution in the spam fighting world, 
+and was also a bit of inspiration that helped to get me thinking about other ways to solve the problem.
+<P>
+
+Thanks to Charles Ying for developing Sendmail::Milter which made this project a lot easier to test,
+a whole slew of other developers for producing Sendmail, Mysql, Perl, Amavis, and Spamassassin, and
+all the administrators and people who help maintain various blacklists and other anti-spam software
+and databases that have helped in keeping email from becoming useless.
+<P>
+
+<CENTER>
+<A HREF="http://www.insomni.net/">Hosting by Insomni Web Development Solutions</A>
+</CENTER>
+<P>
+
+</HTML>
