@@ -858,7 +858,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	{
 		/* we aren't using an smtp-like mailer, so bypass checks */
 		writelog(1,"  Mail delivery is sent from a local interface.  Skipping checks (%s).  Skipping checks.\n",
-				 if_addr);
+				 if_addr?if_addr : mail_mailer);
 		goto PASS_MAIL;
 	}
 
