@@ -775,6 +775,9 @@ sub envrcpt_callback
   #
   ###########################################################################
 
+  # Predeclare privdata, since many of these gotos use it
+  my $privdata;
+
   DELAY_MAIL:
   # Increment the blocked count (if rowid is defined)
   if (defined $rowid) {
@@ -792,7 +795,7 @@ sub envrcpt_callback
     print "  Delaying tempfail reject until eom phase.\n" if ($verbose);
   
     # save that this message needs to be blocked later in the transaction (after eom)
-    my $privdata = "00\x00$mail_from\x00$rcpt_to";
+    $privdata = "00\x00$mail_from\x00$rcpt_to";
     # Save the changes to our privdata for the next callback
     $ctx->setpriv(\$privdata);
     
@@ -816,8 +819,9 @@ sub envrcpt_callback
 
 
   BOUNCE_MAIL:
+  # We don't use this anywhere yet, but may in future...
   # set privdata so later callbacks won't have problems
-  my $privdata = "0";
+  $privdata = "0";
   $ctx->setpriv(\$privdata);
   # Indicate the message should be aborted (want a custom error code?)
   return SMFIS_REJECT;
@@ -853,7 +857,7 @@ sub envrcpt_callback
     }
   }
   # Save our privdata for the next callback
-  my $privdata = "$rowids\x00$mail_from\x00$rcpt_to";
+  $privdata = "$rowids\x00$mail_from\x00$rcpt_to";
   $ctx->setpriv(\$privdata);
 
   # FIXME - Should do mail logging?
@@ -867,7 +871,7 @@ sub envrcpt_callback
   print "ERROR: Database Call Failed!\n  $DBI::errstr\n";
   db_disconnect();  # Disconnect, so will get a new connect next mail attempt
   # set privdata so later callbacks won't have problems (or if db comes back while still in this mail session)
-  my $privdata = "0\x00$mail_from\x00";
+  $privdata = "0\x00$mail_from\x00";
   $ctx->setpriv(\$privdata);
   return SMFIS_CONTINUE if ($pass_mail_when_db_unavail);
   return SMFIS_TEMPFAIL;
@@ -966,7 +970,7 @@ BEGIN:
 
   # Parameters to main are max num of interpreters, num requests to service before recycling threads
   #if (Sendmail::Milter::main(10, 30)) {
-  if (Sendmail::Milter::main()) {
+  if (Sendmail::Milter::main(10, 0)) {
     print "Successful exit from the Sendmail::Milter engine.\n";
   }
   else {
