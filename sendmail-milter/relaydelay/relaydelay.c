@@ -753,21 +753,21 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	regmatch_t pmatch[10];
 	/* Clear our private data on this context */
 
-	writelog(2,"Envrcpt callback:   privdata=%s\n", privdata_ref);
 	row_id[0] = 0;
 	rcpt_to = argv[0];
 
 	if( privdata_ref )
 	{
+		writelog(2,"Envrcpt callback:   privdata=%s\n", privdata_ref);
 		strcpy(buf1, privdata_ref);
 		strncpy(privdata_copy, privdata_ref, SAFESIZ);
 	}
 	else
 	{
+		writelog(2,"Envrcpt callback:   privdata=NULL\n");
 		buf1[0] = 0;
 		privdata_copy[0] = 0;
 	}
-	
 	
 	privdata_copy[SAFESIZ] = 0;
 
@@ -779,18 +779,33 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 	t1 = strchr(buf1, '\t');
 	if( !t1 )
-		return SMFIS_CONTINUE;
+	{
+		writelog(1,"Error: Unexpected: No tab in the privdata (%s)!\n",buf1 );
+	}
+	
 
 	t2 = strchr(t1+1, '\t');
 	if( !t2 )
-		return SMFIS_CONTINUE;
-
-	*t1 = 0;
-	*t2 = 0;
+	{
+		writelog(1,"Error: Unexpected: No 2nd tab in the privdata (%s)!\n",buf1 );
+	}
+	
+	if( t1 && t2 )
+	{
+		*t1 = 0;
+		*t2 = 0;
         strcpy(rowids_buf, buf1);
-	rowids = rowids_buf;
-	mail_from = t1+1;
-
+		rowids = rowids_buf;
+		mail_from = t1+1;
+	}
+	else
+	{
+		rowids_buf[0] = 0;
+		rowids = rowids_buf;
+		buf1[0] = 0;
+		mail_from = buf1;
+	}
+	
 
 	writelog(2,"Stored Sender: %s\nPassed Recipient: %s\n", mail_from, rcpt_to);
 
@@ -799,6 +814,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	relay_name[0] = 0;
 	relay_ident[0] = 0;
 	relay_maybe_forged[0] = 0;
+
+	writelog(2,"relay info: %s\n", tmp);
 
 	if( do_regex("^([^ \t\r]*@)?([^ \t\r]*) ?\\[(.*)\\]( \\(may be forged\\))?$", tmp, &preg, pmatch,1) == 0 )
 	{
@@ -835,6 +852,11 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			}
 		}
 	}
+	else
+	{
+		writelog(1,"do_regex returns non-0: string to match: %s\n", tmp);
+	}
+	
 	mail_mailer = smfi_getsymval(ctx,"{mail_mailer}");
 	sender = smfi_getsymval(ctx,"{mail_addr}");
 	rcpt_mailer = smfi_getsymval(ctx,"{rcpt_mailer}");
@@ -1357,7 +1379,7 @@ WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'",
 			/* Only update the lifetime of records if they are AUTO, wouldn't want to do wildcard records  */
 			char querystr[BUFSIZE];
 			sprintf(querystr,"UPDATE relaytofrom SET record_expires = NOW() WHERE id = %s AND origin_type = 'AUTO'", row_id);
-			if(db_query(querystr,&result))
+			if(db_query(querystr,&result)) 
 			{
 				goto DB_FAILURE;
 			}
