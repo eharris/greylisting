@@ -26,8 +26,8 @@
 #   None known.
 #
 #
-# *** Copyright 2003 by Evan J. Harris --- All Rights Reserved ***
-# *** No warranties expressed or implied, use at your own risk ***
+# *** Copyright 2003-2004 by Evan J. Harris - All Rights Reserved ***
+# *** No warranties expressed or implied, use at your own risk    ***
 #
 ##############################################################################
 
@@ -36,8 +36,10 @@ use Socket;
 use POSIX qw(strftime);
 use Errno qw(ENOENT);
 
-use DB_File;
+#use DB_File;
+use BerkeleyDB;
 use DBI;
+use FileHandle;
 
 use strict;
 
@@ -52,9 +54,20 @@ my $config_file = "/etc/mail/relaydelay.conf";
 # Our global settings that may be overridden from the config file
 #################################################################
 
-# If you do/don't want to see debugging messages printed to stdout,
+# If you do/don't want to see debugging messages printed/logged,
 #   then set this appropriately.
 my $verbose = 1;
+
+# To run as a daemon rather than a standalone script, set this
+# Default is to run standalone.
+my $run_as_daemon = 0;
+
+# This specifies where status messages are printed.  If set to an empty
+# string (the default), they will go to STDOUT.
+# If $run_as_daemon (above) is set, this should be changed to be a file
+# or /dev/null.
+my $log_file = '';
+#my $log_file = '/var/log/relaydelay.log';
 
 # Database connection params
 my $database_type = 'mysql';
@@ -870,7 +883,8 @@ sub envrcpt_callback
   # As strange as it seems, we do not want to bypass the checks if the value is OK or SKIP.
   # Only do the access.db checks if the var holding the file name has been defined
   if (defined $sendmail_accessdb_file) {
-    if (tie (my %accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+    #if (tie (my %accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+    if (tie (my %accessdb, 'BerkeleyDB::Hash', -Filename => $sendmail_accessdb_file, -Flags => DB_RDONLY)) {
       # Tie was successful, now check all the variations of entries we care about
       my $bypass_checks = 0;
       my $lhs;
@@ -1121,8 +1135,6 @@ sub load_config() {
   # make sure the config is only loaded once per instance
   return if ($config_loaded);
 
-  print "Loading Config File: $config_file\n";
-
   # Read and setup our configuration parameters from the config file
   my($msg);
   my($errn) = stat($config_file) ? 0 : 0+$!;
@@ -1135,10 +1147,24 @@ sub load_config() {
   #do $config_file;
   if ($@ ne '') { die "Error in config file $config_file: $@" }
 
+  if ($log_file) { # Keep the output in a log file
+    open STDOUT, ">>$log_file" or die "Couldn't redirect STDOUT to $log_file: $!";
+    STDOUT->autoflush(1);
+  }
+
+  print "\nLoaded Config File: $config_file\n" if $verbose;
+
   $config_loaded = 1;
 }
 
-
+sub catch_sig {
+  my $signame = shift;
+  print "Got a SIG$signame.\nClosing DB connection.\n" if $verbose;
+  db_disconnect();
+  print "Exiting relaydelay daemon process.\n";
+  close(STDOUT);
+  exit 0;
+}
 
 
 my %my_callbacks =
@@ -1175,18 +1201,11 @@ BEGIN:
   # Make sure there are no errors in the config file before we start, and load the socket info
   load_config();
 
-  # Record pid to file
-  if (defined $relaydelay_pid_file) {
-    open(PIDF, ">$relaydelay_pid_file") ||
-      die "Unable to record PID to '$relaydelay_pid_file': $!\n";
-    print PIDF "$$\n";
-    close PIDF;
-  }
-
   if (defined $sendmail_accessdb_file) {
     my %accessdb;
     # Test that we can open the accessdb file
-    if (! tie (%accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+    #if (! tie (%accessdb, 'DB_File', $sendmail_accessdb_file, O_RDONLY)) {
+    if (! tie (my %accessdb, 'BerkeleyDB::Hash', -Filename => $sendmail_accessdb_file, -Flags => DB_RDONLY)) {
       die "ERROR: Unable to open access.db file '$sendmail_accessdb_file': $!";
     }
     untie %accessdb;
@@ -1198,24 +1217,36 @@ BEGIN:
     my $unix_socket = $1;
 
     if (-e $unix_socket) {
-      print "Attempting to unlink local UNIX socket '$unix_socket' ... ";
+      print "Attempting to unlink local UNIX socket '$unix_socket' ... " if $verbose;
 
       if (unlink($unix_socket) == 0) {
-        print "failed.\n";
+        print "failed.\n" if $verbose;
         exit;
       }
-      print "successful.\n";
+      print "successful.\n" if $verbose;
     }
   }
 
   if (not Sendmail::Milter::setconn("$milter_socket_connection")) {
-    print "Failed to set up connection: $?\n";
-    exit;
+    die "Failed to set up connection: $?\n";
   }
 
   # Make sure we can connect to the database 
   my $dbh = db_connect(1);
   die "$DBI::errstr\n" unless($dbh);
+
+  # If dns name updates are enabled, test if the table exists
+  if ($enable_relay_name_updates) {
+    my $arrref = $dbh->selectcol_arrayref('SHOW TABLES');
+    my $found = 0;
+    foreach my $tablename (@$arrref) {
+      $found = 1 if ($tablename eq 'dns_name');
+    }
+    if (! $found) {
+      print "WARNING: relay_name_updates enabled but dns_name table does not exist.  Disabling.\n";
+      $enable_relay_name_updates = 0;
+    }
+  }
   # and disconnect again, since the callbacks won't have access to the handle
   db_disconnect();
 
@@ -1225,27 +1256,61 @@ BEGIN:
   #
 
   if (not Sendmail::Milter::register("$milter_filter_name", \%my_callbacks, SMFI_CURR_ACTS)) {
-    print "Failed to register callbacks for $milter_filter_name.\n";
-    exit;
+    die "Failed to register callbacks for $milter_filter_name.\n";
   }
 
-  print "Starting Sendmail::Milter $Sendmail::Milter::VERSION engine.\n";
+  if ($run_as_daemon) {
+    if (not $log_file) { 
+      print "WARNING: Running as a daemon, but output has not been redirected to a log file.\n";
+    }
+    $SIG{CHLD} = 'IGNORE'; # Automatically reap children
+    defined(my $child_pid = fork()) or die "Couldn't fork daemon process:$!";
+    if ($child_pid) {
+      # I must be the parent:
+      print "Spawned relaydelay daemon.  PID=$child_pid.\n" if $verbose;
+      exit 0;
+    }
+  }
+
+  # I must be the child (or using foreground operation):
+  # Record pid to file
+  if (defined $relaydelay_pid_file) {
+    open(PIDF, ">$relaydelay_pid_file") ||
+      die "Unable to record PID to '$relaydelay_pid_file': $!\n";
+    print PIDF "$$\n";
+    close PIDF;
+  }
+
+  if ($run_as_daemon) {
+    # Be a nice daemon:
+    POSIX::setsid or die "Couldn't start a new session: $!";
+    chdir '/' or die "Couldn't chdir to /: $!";
+    open STDIN, '/dev/null' or die "Couldn't redirect STDIN from /dev/null: $!";
+    open STDERR, '>&STDOUT' or die "Couldn't dup STDOUT: $!";
+    my $sigset = POSIX::SigSet->new();
+    my $action = POSIX::SigAction->new('catch_sig',$sigset,&POSIX::SA_NODEFER);
+    POSIX::sigaction(&POSIX::SIGQUIT, $action);
+  }
+
+  print "Starting Sendmail::Milter $Sendmail::Milter::VERSION engine.\n\n";
 
   # Parameters to main are max num of interpreters, num requests to service before recycling threads
   # We don't set it to recycle children, as that seems to cause coredumps.
   if (Sendmail::Milter::main($maximum_milter_threads, 0)) {
-    print "Successful exit from the Sendmail::Milter engine.\n";
+    print "Successful exit from the Sendmail::Milter engine.\n\n";
   }
   else {
-    print "Unsuccessful exit from the Sendmail::Milter engine.\n";
+    print "Unsuccessful exit from the Sendmail::Milter engine.\n\n";
   }
 }
 
 
 # Make sure when threads are recycled that we release the global db connection
 END {
-  print "Closing DB connection.\n";
-  db_disconnect();
+  if (not $run_as_daemon) { # Signal handler does this in daemon mode
+    print "Closing DB connection.\n" if $verbose;
+    db_disconnect();
+  }
 }
 
 
