@@ -64,14 +64,29 @@ create table relayreport     # Stores settings for each [relay, to, from] triple
         key(rcpt_to(20))
 );
 
-create table dns_name        # Stores the reverse dns name lookup for records
+create table relaystats        # Stores various stats and info per mailhost
 (
-       relay_ip      varchar(18)       NOT NULL,
-       relay_name    varchar(255)      NOT NULL,                       # dns name, stored in reversed character order (for index)
+       relay_ip      varchar(16)       NOT NULL,
+       relay_name    varchar(255),                                     # dns name, stored in reversed character order (for index)
+       helo_name     varchar(255),                                     # helo name, stored in reversed character order (for index)
+       status_flags  smallint unsigned,                                # various status flags concerning this relay
+       mail_attempts int unsigned      NOT NULL,                       # total number of mail deliveries attempted
+       mail_received int unsigned      NOT NULL,                       # total number of successful mails (at least one good rcpt)
+       rcpt_attempts int unsigned      NOT NULL,                       # total number of recipients attempted for all mails
+       rcpt_allowed  int unsigned      NOT NULL,                       # total number of recipients we allowed (for all mails)
        last_update   timestamp         NOT NULL,                       # timestamp of last change to this record (automatic)
+
        primary key(relay_ip),
-       key(relay_name(20))
+       key(relay_name(20)),
+       key(helo_name(20))
 );
+
+# If you had an old style dns_name table, move the data to the new relaystats table
+insert ignore into relaystats (relay_ip, relay_name, last_update) select relay_ip, relay_name, last_update from dns_name;
+drop table dns_name;
+drop table mail_log;
+
+
 
 # This table is not used yet, possibly never will be
 #create table mail_log        # Stores a record for every mail delivery attempt
