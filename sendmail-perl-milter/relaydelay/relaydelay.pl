@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-#############################################################################
+##############################################################################
 #
 # File: relaydelay.pl
 #
@@ -21,8 +21,6 @@
 #   - Probably should store the mail_from and rcpt_to fields in the db in 
 #     reversed character order.  This would make reporting on subdomain 
 #     matches be able to be indexed.
-#   - Should remove the table lock that ensures non-duplicate rows.  
-#     Unfortunately, the cure is probably worse than the disease.
 #
 # Bugs:
 #   None known.
@@ -31,9 +29,8 @@
 # *** Copyright 2003 by Evan J. Harris --- All Rights Reserved ***
 # *** No warranties expressed or implied, use at your own risk ***
 #
-#############################################################################
+##############################################################################
 
-use ExtUtils::testlib;
 use Sendmail::Milter;
 use Socket;
 use Errno qw(ENOENT);
@@ -42,9 +39,10 @@ use DBI;
 
 use strict;
 
-###############################################
-# Our global settings file
-###############################################
+#############################################################################
+# Our global settings file, may be overridden if passed as a command line
+#   parameter to the main relaydelay.pl script.
+#############################################################################
 my $config_file = "/etc/mail/relaydelay.conf";
 
 
@@ -64,6 +62,22 @@ my $database_port = 3306;
 my $database_user = 'db_user';
 my $database_pass = 'db_pass';
 
+# Set this to indicate the milter "name" that this milter will be 
+#   identified by.  This must match the first parameter from the 
+#   INPUT_MAIL_FILTER definition in the sendmail.mc configuration.
+my $milter_filter_name = 'relaydelay';
+
+# This parameter determines how the milter interfaces with the libmilter
+#   API.  Normally, if using a milter on the same machine that is running
+#   sendmail, it will be something like 'local:/var/run/relaydelay.sock', 
+#   but if you want to run the milter on a different machine than is running 
+#   sendmail, you will need to specify how to connect to that copy of 
+#   sendmail by setting this to indicate the machine and port that the 
+#   remote sendmail is listening for connections on with something 
+#   similar to 'inet:2526@sendmail.server.org'.
+# This parameter must match the S= option in the INPUT_MAIL_FILTER
+#   definition in the sendmail.mc file.
+my $milter_socket_connection = 'local:/var/run/relaydelay.sock';
 
 # Set this to something nonzero to limit the number of children that the 
 #   milter will spawn.  Since children are never recycled (there seems 
@@ -224,9 +238,6 @@ sub envfrom_callback
 {
   my $ctx = shift;
   my @args = @_;
-
-  # Make sure we have the config information loaded
-  load_config();
 
   my $mail_from = $args[0];
 
@@ -929,20 +940,31 @@ my %my_callbacks =
 
 BEGIN:
 {
-  if (scalar(@ARGV) < 2) {
-    print "Usage: perl $0 <name_of_filter> <path_to_sendmail.cf>\n";
+  if (scalar(@ARGV) > 1) {
+    print "Usage: perl $0 [config_file]\n\n"
+      . "Please refer to documentation regarding changes to the configuration file\n"
+      . "  where options that used to be specified on the command line are now\n"
+      . "  set in the configuration file.\n"
+      . "As an option, the path to the config file may be specified on the command line\n"
+      . "  (to avoid modifying the filter script).\n";
     exit;
   }
 
-  my $conn = Sendmail::Milter::auto_getconn($ARGV[0], $ARGV[1]);
+  # If the config file was specified on the command line, use it
+  if (defined($ARGV[0])) {
+    $config_file = $ARGV[0];
+  }
 
-  print "Found connection info for '$ARGV[0]': $conn\n";
+  # Make sure there are no errors in the config file before we start, and load the socket info
+  load_config();
 
-  if ($conn =~ /^local:(.+)$/) {
+  print "Using connection '$milter_socket_connection' for filter $milter_filter_name\n";
+
+  if ($milter_socket_connection =~ /^local:(.+)$/i) {
     my $unix_socket = $1;
 
     if (-e $unix_socket) {
-      print "Attempting to unlink UNIX socket '$conn' ... ";
+      print "Attempting to unlink local UNIX socket '$unix_socket' ... ";
 
       if (unlink($unix_socket) == 0) {
         print "failed.\n";
@@ -952,13 +974,10 @@ BEGIN:
     }
   }
 
-  if (not Sendmail::Milter::auto_setconn($ARGV[0], $ARGV[1])) {
-    print "Failed to detect connection information.\n";
+  if (not Sendmail::Milter::setconn("$milter_socket_connection")) {
+    print "Failed to set up connection: $?\n";
     exit;
   }
-
-  # Make sure there are no errors in the config file before we start
-  load_config();
 
   # Make sure we can connect to the database 
   my $dbh = db_connect(1);
@@ -971,8 +990,8 @@ BEGIN:
   #  current version's filtering capabilities.
   #
 
-  if (not Sendmail::Milter::register($ARGV[0], \%my_callbacks, SMFI_CURR_ACTS)) {
-    print "Failed to register callbacks for $ARGV[0].\n";
+  if (not Sendmail::Milter::register("$milter_filter_name", \%my_callbacks, SMFI_CURR_ACTS)) {
+    print "Failed to register callbacks for $milter_filter_name.\n";
     exit;
   }
 

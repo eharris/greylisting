@@ -15,49 +15,63 @@ Prerequisites:
 
 To install:
 
-1. Modify relaydelay.conf to your liking and drop it in /etc/mail,
-   or change the script $config_file to point to the location you
-   want to store it.  I suggest you make it readable only by root so local
-   users can't see the user and password for the database.
+1. Modify relaydelay.conf to your liking and drop it in the default location
+   of /etc/mail, or pass the location of the config file as the parameter 
+   when starting the milter. 
+   I suggest you make it readable only by root so local users can't see the 
+   user and password used for the database.
    
-2. Configure the database using the commands in dbdef.sql.  Make sure that
+2. Configure the database using the commands in mysql.sql.  Make sure that
    you created the user defined in the config file, and that that user has 
-   access to login from the machine you're running sendmail and the milter on.
+   access to login from the machine you're running the milter on, and that 
+   the login and password match those configured in relaydelay.conf.
+
+   Also make sure your database can handle enough total connections as you
+   are may have milter threads running.  Each thread the milter starts has 
+   its own db connection.  While you can limit the number of threads one
+   instance of the milter will spawn, keep in mind that if you have more 
+   than one machine pointed at the same db, you will need it configured to 
+   handle enough total connections for them all, and any other tasks you i
+   have using the same db server.
    
 3. Add the milter config to your sendmail.mc and rebuild your sendmail.cf.
-   An example set of config lines is:
+   An example set of config lines (using the defaults for relaydelay) is:
 
    define(`MILTER',1)
-   INPUT_MAIL_FILTER(`myfilter', `S=local:/var/run/perl.sock, T=S:1m;R:2m;E:3m')dnl
+   INPUT_MAIL_FILTER(`relaydelay', `S=local:/var/run/relaydelay.sock, F=T, T=S:1m;R:2m;E:3m')dnl
 
    Note that the define line is only required if it's not already in the config
    file somewhere.  It's probably already there if you're using another milter
    like amavis with spamassassin (which is recommended).
 
+   If for some reason the milter is unavailable, with the lines above, the 
+   F=T parameter indicates that sendmail should tempfail any connections if 
+   it can't communicate with the filter.
+   
+   If you want to have sendmail just ignore if the milter is unavailable,
+   simply omit the "F=T, " parameter from the INPUT_MAIL_FILTER line above,
+   and sendmail will process any mail as if the milter wasn't configured
+   for as long as the milter is unavailable.
+
 4. If your mail system gets a mid- to large- amount of either spam or "real"
    mail, you may also want to limit the number of sendmail children to a 
-   reasonable number if you haven't already done so.  The milter will spawn
-   as many copies of itself as it needs to to service all the concurrent 
-   sendmail processes, and the memory use could get quite large if a large
-   spam wave came in.  Each milter copy also consumes a database connection,
-   which you may also run out of.  To limit this, add something like:
+   reasonable number if you haven't already done so.  To limit this, add 
+   something like:
 
    define(`confMAX_DAEMON_CHILDREN', `40')dnl
 
    to your sendmail.mc.  Adjust the limit as appropriate for your normal
-   level of email.  Also make sure your database can handle more than 
-   this number of connections, as each copy of the milter has its own db 
-   connection.
+   level of email.
 
 5. Make sure the script has the execute bit set, and test the configuration by 
-   opening another window and running something similar to:
-
-   relaydelay.pl myfilter /etc/mail/sendmail.cf 
+   opening another window and running relaydelay.pl.  If the relaydelay.conf
+   file is located somewhere other than the default /etc/mail/ directory, 
+   simply specify the file location as the only parameter.
 
    Or, if you built a threaded perl somewhere else that isn't the system 
    installed perl, run something like:
 
-   /usr/src/perl-5.8.0/perl relaydelay.pl myfilter /etc/mail/sendmail.cf
+   /usr/src/perl-5.8.0/perl relaydelay.pl [optional config file]
 
 6. After you see mail being processed and entries being created correctly,
    then you probably want to make sure $verbose is turned off, and put 

@@ -3,6 +3,12 @@ Changelog for relaydelay.pl and associated files:
 
 UNRELEASED -
 
+  2003-07-13 - CONFIG CHANGE - Changed the milter to have config parameters
+    for the milter/sendmail interface.  Now the only option to the milter
+    script is an optional config file if different from the default location.
+    This also removes the requirement of modifying the milter script if the
+    config is stored in a different location.
+
   2003-07-13 - NEW OPTION - Added a config option to limit the number of 
     threads the milter will spawn.  Once a thread is spawned it will continue
     to exist until the milter is shutdown.  Since each thread increases the
