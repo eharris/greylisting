@@ -589,7 +589,7 @@ sub envrcpt_callback
   #   Not used (since I don't want to depend on it)
   #my $hostname = hostname();
 
-  print strftime('\n=== %Y-%m-%d %H:%M:%S ===\n', localtime($timestamp)) if ($verbose);
+  print "\n", strftime('=== %Y-%m-%d %H:%M:%S ===', localtime($timestamp)), "\n" if ($verbose);
 
   # declare our info vars
   my $rowid;
