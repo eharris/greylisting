@@ -4,7 +4,7 @@
 #
 # File: relaydelay.pl
 #
-# Version: 0.01
+# Version: 0.02
 # 
 # Programmer: Evan J. Harris <eharris@puremagic.com>
 #
@@ -14,14 +14,15 @@
 #   methods for better blocking spam.
 #
 # References:
-#   For Greylisting info, see http://www.puremagic.com/~eharris/spam/
+#   For Greylisting info, see http://projects.puremagic.com/greylisting/
 #   For SMTP info, see RFC821, RFC1891, RFC1893
 #
 # Notes:
-#   - Probably should store the mail_from and rcpt_to fields in the db in reversed character order.
-#     This would make reporting on subdomain matches be able to be indexed.
-#   - Should remove the table lock that ensures non-duplicate rows.  Unfortunately, the cure is probably
-#     worse than the disease.
+#   - Probably should store the mail_from and rcpt_to fields in the db in 
+#     reversed character order.  This would make reporting on subdomain 
+#     matches be able to be indexed.
+#   - Should remove the table lock that ensures non-duplicate rows.  
+#     Unfortunately, the cure is probably worse than the disease.
 #
 # Bugs:
 #   None known.
@@ -64,15 +65,20 @@ my $database_user = 'db_user';
 my $database_pass = 'db_pass';
 
 # This determines how many seconds we will block inbound mail that is
-#   from a previously unknown [ip,from,to] triplet.
-my $delay_mail_secs = 3600;  # One hour
+#   from a previously unknown [ip,from,to] triplet.  If it is set to
+#   zero, incoming mail associations will be learned, but no deliveries
+#   will be tempfailed.  Use a setting of zero with caution, as it
+#   will learn spammers as well as legitimate senders.
+#   If it is set to a negative number (like -1), then the mail will
+#   be tempfailed the first time it is seen, but accepted thereafter.
+my $delay_mail_secs = 58 * 60;  # 58 Minutes
 
 # This determines how many seconds of life are given to a record that is
 #   created from a new mail [ip,from,to] triplet.  Note that the window
 #   created by this setting for passing mails is reduced by the amount
 #   set for $delay_mail_secs.
 # NOTE: See Also: update_record_life and update_record_life_secs.
-my $auto_record_life_secs = 4 * 3600;  # 4 hours
+my $auto_record_life_secs = 5 * 3600;  # 5 hours
 
 # True if we should update the life of a record when passing a mail
 #   This should generally be enabled, unless the normal lifetime
@@ -498,6 +504,8 @@ sub envrcpt_callback
   my $rcpt_mailer = $ctx->getsymval("{rcpt_mailer}");
   my $recipient   = $ctx->getsymval("{rcpt_addr}");
   my $queue_id    = $ctx->getsymval("{i}");
+  my $authen      = $ctx->getsymval("{auth_authen}");
+  my $authtype    = $ctx->getsymval("{auth_type}");
 
   print "  From: $sender - To: $recipient\n" if ($verbose);
   print "  InMailer: $mail_mailer - OutMailer: $rcpt_mailer - QueueID: $queue_id\n" if ($verbose);
@@ -511,6 +519,15 @@ sub envrcpt_callback
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
     goto PASS_MAIL;
   }
+
+  # Only do our processing if the mail client is not authenticated in some way
+  if ($authen ne "")
+  {
+    print "  AuthType: $authtype - Credentials: $authen\n" if ($verbose);
+    print "  Mail delivery is authenticated.  Skipping checks.\n" if ($verbose);
+    goto PASS_MAIL;
+  }
+
 
   # Check for local IP relay whitelisting from the sendmail access file
   # FIXME - needs to be implemented
@@ -673,6 +690,12 @@ sub envrcpt_callback
     
     # And release the table lock
     $dbh->do("UNLOCK TABLE") or goto DB_FAILURE;
+
+    if ($delay_mail_secs == 0) {
+      print "  New mail row successfully inserted.  Passing mail.  rowid: $rowid\n" if ($verbose);
+      # and now jump to normal blocking actions
+      goto PASS_MAIL;
+    }
 
     print "  New mail row successfully inserted.  Issuing a tempfail.  rowid: $rowid\n" if ($verbose);
     # and now jump to normal blocking actions

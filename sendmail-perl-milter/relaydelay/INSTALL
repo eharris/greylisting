@@ -48,6 +48,14 @@ To install:
    then you probably want to make sure $verbose is turned off, and put 
    the startup of the script into your sendmail start script(s).
 
+If you will be doing initial install learning by setting the $delay_mail_secs
+configuration parameter to zero, don't forget to set it to a normal value 
+after a few days of runtime.
+
+To perform nightly maintenance on the database table (keep it pruned for
+speed reasons), add the db_maintenance.pl script to your nightly
+crontab.  Note that no records should be lost, as before they are deleted
+from the active table, they are copied to the reporting table.
 
 Enjoy!
 

@@ -1,0 +1,27 @@
+
+Changelog for relaydelay.pl and associated files:
+
+0.02 - 
+  2003-06-26 - Allowed for setting the initial delay to 0 seconds, which 
+    allows new users to run in a "learning only" mode where no emails
+    will be tempfailed.  Also, if the initial delay is set to a negative
+    number, the first delivery attempt of unknown triplets will be failed,
+    but any subsequent attempts will be allowed (within other time limits).
+
+  2003-06-26 - Added a new table to the database definition for reporting,
+    and a new script to move expired entries to the reporting table to help
+    keep the active table to a minimum size (for speed).
+
+  2003-06-26 - Added a check to avoid greylisting checks if the mail client
+    is authenticated with sendmail.  Suggested by Borja Perez.
+    
+  2003-06-26 - Minor comment changes.  Update to whitelist_ip.txt.
+
+  2003-06-25 - Changed defaults in relaydelay.pl and relaydelay.conf to be
+    58 minutes for initial timeout, with a 5 hour window.
+
+  2003-06-25 - Added whitelist_ip.txt file to the sources, describing IPs
+    and networks that most users of a Greylisting implementation will want.
+
+0.01 - Initial Release
+
