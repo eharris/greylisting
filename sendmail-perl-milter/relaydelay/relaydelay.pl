@@ -26,8 +26,8 @@
 #   None known.
 #
 #
-# *** Copyright 2003 by Evan J. Harris --- All Rights Reserved ***
-# *** No warranties expressed or implied, use at your own risk ***
+# *** Copyright 2003-2004 by Evan J. Harris - All Rights Reserved ***
+# *** No warranties expressed or implied, use at your own risk    ***
 #
 ##############################################################################
 
@@ -36,9 +36,10 @@ use Socket;
 use POSIX qw(strftime);
 use Errno qw(ENOENT);
 
-use DB_File;
+#use DB_File;
 use BerkeleyDB;
 use DBI;
+use FileHandle;
 
 use strict;
 
@@ -53,9 +54,20 @@ my $config_file = "/etc/mail/relaydelay.conf";
 # Our global settings that may be overridden from the config file
 #################################################################
 
-# If you do/don't want to see debugging messages printed to stdout,
+# If you do/don't want to see debugging messages printed/logged,
 #   then set this appropriately.
 my $verbose = 1;
+
+# To run as a daemon rather than a standalone script, set this.
+# The default is to run standalone.
+my $run_as_daemon = 0;
+
+# This specifies where status messages are printed.  If set to an empty
+# string (the default), they will go to STDOUT.
+# If $run_as_daemon (above) is set, this should be changed to be a file
+# or /dev/null.
+my $log_file = '';
+#my $log_file = '/var/log/relaydelay.log';
 
 # Database connection params
 my $database_type = 'mysql';
@@ -64,6 +76,12 @@ my $database_host = 'localhost';
 my $database_port = 3306;
 my $database_user = 'db_user';
 my $database_pass = 'db_pass';
+
+# Set this if you want to check for stale db connections at the entry to
+#   every callback that accesses the db.  If your db is not close to you 
+#   network-wise, this may add a fair amount of latency.  If your database 
+#   is reliable, it's probably not necessary.  Disabled by default.
+my $check_stale_db_handles = 0;
 
 # Set this to indicate the milter "name" that this milter will be 
 #   identified by.  This must match the first parameter from the 
@@ -103,6 +121,13 @@ my $sendmail_accessdb_file = '/etc/mail/access.db';
 
 # Where the pid file should be stored for relaydelay
 my $relaydelay_pid_file = '/var/run/relaydelay.pid';
+
+# Set this if you want to check mail that would be handled by ALL 
+#   sendmail's defined mailers, rather than just the smtp and esmtp mailers.
+# If you have custom mailers defined that handle smtp traffic, you will
+#   probably want to enable this.  If you have special non-smtp mailers
+# you may want to disable this.  Default is disabled.
+my $force_all_mailer_checks = 0;
 
 # Set this to something nonzero to limit the number of children that the 
 #   milter will spawn.  Since children are never recycled (there seems 
@@ -207,6 +232,28 @@ my $reverse_mail_tracking = 1;
 #   used if $reverse_mail_tracking is enabled.
 my $reverse_mail_life_secs = 4 * 24 * 3600;  # 4 Days
 
+# Set this to true if you want the relaydelay milter to try to autolearn local
+#   recipients and domains, and have non-primary MX's block (tempfail) mail to
+#   unlearned local recipients.  This gives a mechanism for a cooperating set 
+#   of mail hosts running the milter to avoid relaying (and double-bounces) 
+#   for invalid recipients until at least one successful mail to that 
+#   recipient has been processed by the primary MX, using the "local" mailer.
+# There is no point in enabling this unless your primary MX is also the 
+#   MTA that handles delivery for your domains, and you have more than one
+#   MX host for some or all of the domains you handle, and they are all 
+#   running the milter.
+# In fact, if this is enabled and there are any rows existing in the 
+#   localemail table that are in your domains, only a greylisting host
+#   delivering mail with sendmail's "local" mailer will be able to accept
+#   mail for any recipients that are not listed.  USE WITH CAUTION.
+my $learn_local_recipients = 1;
+
+# This parameter controls how long records for local recipients live
+#   (if $learn_local_recipients is enabled).  This specifies how 
+#   long secondaries will pass mail for the listed recipient without
+#   the primary MX host having passed a mail for this recipient.
+my $learn_local_recipients_life_secs = 30 * 24 * 3600;  # 30 Days
+
 # This controls the amount of time we tarpit a RCPT command before 
 # tempfailing it.  It should not be so large as to cause legit
 # mailers to drop the connection because we haven't responded yet.
@@ -243,7 +290,14 @@ use constant HELO_IP_MISMATCH  => 0x0020;
 sub db_connect($) {
   my $verbose = shift;
 
-  return $global_dbh if (defined $global_dbh);
+  if (defined($global_dbh)) {
+    if ($check_stale_db_handles) {
+      return $global_dbh if ($global_dbh->ping());
+    } 
+    else {
+      return $global_dbh;
+    }
+  }
 
   my $dsn = "DBI:$database_type:database=$database_name:host=$database_host:port=$database_port";
   print "DBI Connecting to $dsn\n" if $verbose;
@@ -377,7 +431,7 @@ sub envfrom_callback
     my $mail_mailer = $ctx->getsymval("{mail_mailer}");
     
     # Only do format checks if the inbound mailer is an smtp variant.
-    if ($mail_mailer !~ /smtp\Z/i) {
+    if (($mail_mailer !~ /smtp\Z/i) and (! $force_all_mailer_checks)) {
       # we aren't using an smtp-like mailer, so bypass checks
       #print "Envelope From: Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
     }
@@ -617,7 +671,7 @@ sub abort_callback
   #   (this means we didn't expect/cause an abort, but something else did)
   if (substr($rowids, 0, 1) ne '0') {
     # Ok, we need to update the db, so get a handle
-    my $dbh = db_connect(0) or goto DB_FAILURE;
+    my $dbh = db_connect($verbose) or goto DB_FAILURE;
   
     # split up the rowids and update each in turn
     my @rowids = split(",", $rowids);
@@ -686,7 +740,10 @@ sub reverse_track($$$)
   # Note the reversed from and to fields! 
   $sth->execute($rcpt_to, $mail_from) or return;
   my $rowid = $sth->fetchrow_array();
-  my $nextrowid = $sth->fetchrow_array();
+  my $nextrowid;
+  if (defined($rowid)) {
+    $nextrowid = $sth->fetchrow_array();
+  }
   $sth->finish();
 
   if (defined($rowid) and !defined($nextrowid)) {
@@ -727,7 +784,7 @@ sub envrcpt_callback
   #   Not used (since I don't want to depend on it)
   #my $hostname = hostname();
 
-  print strftime("\n=== %Y-%m-%d %H:%M:%S ===\n", localtime($timestamp)) if ($verbose);
+  print "\n", strftime('=== %Y-%m-%d %H:%M:%S ===', localtime($timestamp)), "\n" if ($verbose);
 
   # declare our info vars
   my $rowid;
@@ -755,7 +812,7 @@ sub envrcpt_callback
   print "Passed Recipient: $rcpt_to\n" if ($verbose);
 
   # Get the database handle (after got the privdata)
-  my $dbh = db_connect(0) or goto DB_FAILURE;
+  my $dbh = db_connect($verbose) or goto DB_FAILURE;
   
   #print "my_envrcpt:\n";
   #print "   + args: '" . join(', ', @args) . "'\n";
@@ -1004,7 +1061,7 @@ sub envrcpt_callback
     }
     my $query = "SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom "
       .         "  WHERE record_expires > NOW() "
-      .         "    AND relay_ip  IS NULL "
+      .         "    AND relay_ip IS NULL "
       .         "    AND mail_from IS NULL "
       .         "    AND ($subquery) "
       .         "  ORDER BY length(rcpt_to) DESC";
@@ -1072,7 +1129,7 @@ sub envrcpt_callback
   #   that and other "local looking" from addresses as using the local mailer, 
   #   even though they are coming from off-site.  So we have to exclude the 
   #   "local" mailer from the exemption since it lies.
-  if (($mail_mailer !~ /smtp\Z/i) and ($mail_mailer !~ /\Alocal\Z/i)) {
+  if (($mail_mailer !~ /smtp\Z/i) and ($mail_mailer !~ /\Alocal\Z/i) and (! $force_all_mailer_checks)) {
     # we aren't using an smtp-like mailer, so bypass checks
     print "  Mail delivery is not using an smtp-like mailer.  Skipping checks.\n" if ($verbose);
     reverse_track($dbh, $mail_from, $rcpt_to) if ($reverse_mail_tracking and $rcpt_mailer !~ /\Alocal\Z/i);
@@ -1368,8 +1425,6 @@ sub load_config() {
   # make sure the config is only loaded once per instance
   return if ($config_loaded);
 
-  print "Loading Config File: $config_file\n";
-
   # Read and setup our configuration parameters from the config file
   my($msg);
   my($errn) = stat($config_file) ? 0 : 0+$!;
@@ -1382,10 +1437,24 @@ sub load_config() {
   #do $config_file;
   if ($@ ne '') { die "Error in config file $config_file: $@" }
 
+  if ($log_file) { # Keep the output in a log file
+    open STDOUT, ">>$log_file" or die "Couldn't redirect STDOUT to $log_file: $!";
+    STDOUT->autoflush(1);
+  }
+
+  print "\nLoaded Config File: $config_file\n" if $verbose;
+
   $config_loaded = 1;
 }
 
-
+sub catch_sig {
+  my $signame = shift;
+  print "Got a SIG$signame.\nClosing DB connection.\n" if $verbose;
+  db_disconnect();
+  print "Exiting relaydelay daemon process.\n";
+  close(STDOUT);
+  exit 0;
+}
 
 
 my %my_callbacks =
@@ -1422,14 +1491,6 @@ BEGIN:
   # Make sure there are no errors in the config file before we start, and load the socket info
   load_config();
 
-  # Record pid to file
-  if (defined $relaydelay_pid_file) {
-    open(PIDF, ">$relaydelay_pid_file") ||
-      die "Unable to record PID to '$relaydelay_pid_file': $!\n";
-    print PIDF "$$\n";
-    close PIDF;
-  }
-
   if (defined $sendmail_accessdb_file) {
     my %accessdb;
     # Test that we can open the accessdb file
@@ -1447,24 +1508,36 @@ BEGIN:
     my $unix_socket = $1;
 
     if (-e $unix_socket) {
-      print "Attempting to unlink local UNIX socket '$unix_socket' ... ";
+      print "Attempting to unlink local UNIX socket '$unix_socket' ... " if $verbose;
 
       if (unlink($unix_socket) == 0) {
-        print "failed.\n";
+        print "failed.\n" if $verbose;
         exit;
       }
-      print "successful.\n";
+      print "successful.\n" if $verbose;
     }
   }
 
   if (not Sendmail::Milter::setconn("$milter_socket_connection")) {
-    print "Failed to set up connection: $?\n";
-    exit;
+    die "Failed to set up connection: $?\n";
   }
 
   # Make sure we can connect to the database 
   my $dbh = db_connect(1);
   die "$DBI::errstr\n" unless($dbh);
+
+  # If dns name updates are enabled, test if the table exists
+  if ($enable_relay_name_updates) {
+    my $arrref = $dbh->selectcol_arrayref('SHOW TABLES');
+    my $found = 0;
+    foreach my $tablename (@$arrref) {
+      $found = 1 if ($tablename eq 'relaystats');
+    }
+    if (! $found) {
+      print "WARNING: relay_name_updates enabled but relaystats table does not exist.  Disabling.\n";
+      $enable_relay_name_updates = 0;
+    }
+  }
   # and disconnect again, since the callbacks won't have access to the handle
   db_disconnect();
 
@@ -1474,27 +1547,61 @@ BEGIN:
   #
 
   if (not Sendmail::Milter::register("$milter_filter_name", \%my_callbacks, SMFI_CURR_ACTS)) {
-    print "Failed to register callbacks for $milter_filter_name.\n";
-    exit;
+    die "Failed to register callbacks for $milter_filter_name.\n";
   }
 
-  print "Starting Sendmail::Milter $Sendmail::Milter::VERSION engine.\n";
+  if ($run_as_daemon) {
+    if (not $log_file) { 
+      print "WARNING: Running as a daemon, but output has not been redirected to a log file.\n";
+    }
+    $SIG{CHLD} = 'IGNORE'; # Automatically reap children
+    defined(my $child_pid = fork()) or die "Couldn't fork daemon process:$!";
+    if ($child_pid) {
+      # I must be the parent:
+      print "Spawned relaydelay daemon.  PID=$child_pid.\n" if $verbose;
+      exit 0;
+    }
+  }
+
+  # I must be the child (or using foreground operation):
+  # Record pid to file
+  if (defined $relaydelay_pid_file) {
+    open(PIDF, ">$relaydelay_pid_file") ||
+      die "Unable to record PID to '$relaydelay_pid_file': $!\n";
+    print PIDF "$$\n";
+    close PIDF;
+  }
+
+  if ($run_as_daemon) {
+    # Be a nice daemon:
+    POSIX::setsid or die "Couldn't start a new session: $!";
+    chdir '/' or die "Couldn't chdir to /: $!";
+    open STDIN, '/dev/null' or die "Couldn't redirect STDIN from /dev/null: $!";
+    open STDERR, '>&STDOUT' or die "Couldn't dup STDOUT: $!";
+    my $sigset = POSIX::SigSet->new();
+    my $action = POSIX::SigAction->new('catch_sig',$sigset,&POSIX::SA_NODEFER);
+    POSIX::sigaction(&POSIX::SIGQUIT, $action);
+  }
+
+  print "Starting Sendmail::Milter $Sendmail::Milter::VERSION engine.\n\n";
 
   # Parameters to main are max num of interpreters, num requests to service before recycling threads
   # We don't set it to recycle children, as that seems to cause coredumps.
   if (Sendmail::Milter::main($maximum_milter_threads, 0)) {
-    print "Successful exit from the Sendmail::Milter engine.\n";
+    print "Successful exit from the Sendmail::Milter engine.\n\n";
   }
   else {
-    print "Unsuccessful exit from the Sendmail::Milter engine.\n";
+    print "Unsuccessful exit from the Sendmail::Milter engine.\n\n";
   }
 }
 
 
 # Make sure when threads are recycled that we release the global db connection
 END {
-  print "Closing DB connection.\n";
-  db_disconnect();
+  if (not $run_as_daemon) { # Signal handler does this in daemon mode
+    print "Closing DB connection.\n" if $verbose;
+    db_disconnect();
+  }
 }
 
 
