@@ -752,9 +752,19 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	writelog(2,"Envrcpt callback:   privdata=%s\n", privdata_ref);
 	row_id[0] = 0;
 	rcpt_to = argv[0];
-	strcpy(buf1, privdata_ref);
 
-	strncpy(privdata_copy, privdata_ref, SAFESIZ);
+	if( privdata_ref )
+	{
+		strcpy(buf1, privdata_ref);
+		strncpy(privdata_copy, privdata_ref, SAFESIZ);
+	}
+	else
+	{
+		buf1[0] = 0;
+		privdata_copy[0] = 0;
+	}
+	
+	
 	privdata_copy[SAFESIZ] = 0;
 
 	if( privdata_ref )
@@ -983,7 +993,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			}
 			if( atoi(row[2]) )
 			{
-				writelog(1,"  Whitelisted Recpt %s. Skipping checks and passing the mail.\n", rcpt_domain);
+				writelog(1,"  Whitelisted Recpt %s@%s. Skipping checks and passing the mail.\n", rcpt_acct, rcpt_domain);
 				goto PASS_MAIL;
 			}
 		}
