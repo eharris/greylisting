@@ -1408,7 +1408,7 @@ WHERE record_expires > NOW()   AND mail_from IS NULL AND rcpt_to   IS NULL AND (
 			if( atoi(row[1]) )
 			{
 				writelog(1,"  Blacklisted Relay (%s[%s],%s,%s). Skipping checks and rejecting the mail.\n",relay_name, relay_ip, mail_from, rcpt_to);
-				goto DELAY_MAIL;
+				goto BOUNCE_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
@@ -1474,7 +1474,7 @@ WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND 
 			if( atoi(row[1]) )
 			{
 				writelog(1,"  Blacklisted Recpt (%s,%s,%s). Skipping checks and rejecting the mail.\n",relay_ip, mail_from, rcpt_to);
-				goto DELAY_MAIL;
+				goto BOUNCE_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
@@ -1563,7 +1563,7 @@ WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) O
 			if( atoi(row[1]) )
 			{
 				writelog(1,"  Blacklisted Sender (%s,%s,%s). Skipping checks and rejecting the mail.\n",relay_ip,mail_from,rcpt_to);
-				goto DELAY_MAIL;
+				goto BOUNCE_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
@@ -1596,7 +1596,7 @@ WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to = '%s' AND (%s) OR
 			if( atoi(row[1]) )
 			{
 				writelog(1,"  Blacklisted Sender->Recipient pair %s->%s. (ip=%s) Skipping checks and rejecting the mail.\n",mail_from,rcpt_to,relay_ip);
-				goto DELAY_MAIL;
+				goto BOUNCE_MAIL;
 			}
 			if( atoi(row[2]) )
 			{
@@ -1803,6 +1803,7 @@ WHERE record_expires > NOW()   AND mail_from = '%s' AND rcpt_to   = '%s'",
 	privdata_ref = 0;
 
 	/* Indicate the message should be aborted (want a custom error code?) */
+	smfi_setreply(ctx, "553", "5.3.0", "You really got someone quite upset at this site: you won't be able to deliver mail here any more. Go Away!");
 	return SMFIS_REJECT;
 
 	PASS_MAIL:
