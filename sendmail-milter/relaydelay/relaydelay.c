@@ -856,9 +856,13 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
         /* Check to see if the mail is looped back on a local interface and skip checks if so */
 	if( (if_addr && strcmp(if_addr,relay_ip) == 0) || !strcmp(mail_mailer,"local") || !strcmp(relay_ip,"127.0.0.1") )
 	{
-		/* we aren't using an smtp-like mailer, so bypass checks */
-		writelog(1,"  Mail delivery is sent from a local interface.  Skipping checks (%s).  Skipping checks.\n",
-				 if_addr?if_addr : mail_mailer);
+		/* we are using an smtp-like mailer, and we are a local connection, so bypass checks */
+		if( if_addr )
+			writelog(1,"  Mail delivery is sent from a local interface (%s).  Skipping checks.\n",
+					 if_addr);
+		else
+			writelog(1,"  Mail delivery is sent from a local interface (%s).  Skipping checks.\n",
+					 mail_mailer);
 		goto PASS_MAIL;
 	}
 
