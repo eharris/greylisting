@@ -19,6 +19,7 @@ int lineno = 1;
 \$update_record_life_secs	{ return KW_UPDATE_RECORD_LIFE_SECS;}
 \$check_wildcard_relay_ip	{ return KW_CHECK_WILDCARD_RELAY_IP;}
 \$check_wildcard_rcpt_to	{ return KW_CHECK_WILDCARD_RCPT_TO;}
+\$check_wildcard_mail_from	{ return KW_CHECK_WILDCARD_MAIL_FROM;}
 \$tempfail_messages_after_data_phase	{ return KW_TEMPFAIL_MESSAGES_AFTER_DATA_PHASE;}
 \$do_relay_lookup_by_subnet	{ return KW_DO_RELAY_LOOKUP_BY_SUBNET;}
 \$enable_relay_name_updates	{ return KW_ENABLE_RELAY_NAME_UPDATES;}

@@ -11,6 +11,7 @@ extern int
 	update_record_life_secs,
 	check_wildcard_relay_ip,
 	check_wildcard_rcpt_to,
+	check_wildcard_mail_from,
 	tempfail_messages_after_data_phase,
 	do_relay_lookup_by_subnet,
 	enable_relay_name_updates,
@@ -43,7 +44,7 @@ static char database_type_buf[100],
 %token KW_DATABASE_TYPE KW_VERBOSE KW_DATABASE_NAME KW_DATABASE_HOST KW_DATABASE_PORT KW_DATABASE_USER KW_DATABASE_PASS
 %token KW_AUTO_RECORD_LIFE_SECS KW_UPDATE_RECORD_LIFE  KW_UPDATE_RECORD_LIFE_SECS KW_CHECK_WILDCARD_RELAY_IP  KW_CHECK_WILDCARD_RCPT_TO
 %token KW_TEMPFAIL_MESSAGES_AFTER_DATA_PHASE KW_DO_RELAY_LOOKUP_BY_SUBNET KW_ENABLE_RELAY_NAME_UPDATES KW_CHECK_ENVELOPE_ADDRESS_FORMAT
-%token KW_DELAY_MAIL_SECS KW_PASS_MAIL_WHEN_DB_UNAVAIL  SEMI EQ USE STRICT MY
+%token KW_DELAY_MAIL_SECS KW_PASS_MAIL_WHEN_DB_UNAVAIL  SEMI EQ USE STRICT MY KW_CHECK_WILDCARD_MAIL_FROM
 
 %token <str> STR NAME
 %token <num> NUM
@@ -71,6 +72,7 @@ statement : USE STRICT SEMI {}
 	| KW_UPDATE_RECORD_LIFE_SECS EQ NUM SEMI {update_record_life_secs = $3; }
 	| KW_CHECK_WILDCARD_RELAY_IP EQ NUM SEMI { check_wildcard_relay_ip = $3; }
     	| KW_CHECK_WILDCARD_RCPT_TO EQ NUM SEMI { check_wildcard_rcpt_to = $3; }
+    	| KW_CHECK_WILDCARD_MAIL_FROM EQ NUM SEMI { check_wildcard_mail_from = $3; }
     	| KW_TEMPFAIL_MESSAGES_AFTER_DATA_PHASE EQ NUM SEMI { tempfail_messages_after_data_phase = $3; }
     	| KW_DO_RELAY_LOOKUP_BY_SUBNET EQ NUM SEMI { do_relay_lookup_by_subnet = $3; }
     	| KW_ENABLE_RELAY_NAME_UPDATES EQ NUM SEMI { enable_relay_name_updates = $3; }

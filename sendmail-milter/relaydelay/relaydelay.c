@@ -66,7 +66,7 @@ int update_record_life_secs = 36 * 24 * 3600;
 */
 int  check_wildcard_relay_ip = 1;
 int  check_wildcard_rcpt_to  = 1;
-
+int  check_wildcard_mail_from = 1;
 /*
 # Set this to a nonzero value if you want to wait until after the DATA
 #   phase before issuing the TEMPFAIL for delayed messages.  If this
@@ -697,6 +697,16 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	char row_id[32],rowids_buf[BUFSIZE];
 	int res;
 	MYSQL_RES *result;
+	char buf2[BUFSIZE], *p2, buf3[BUFSIZE];
+	char *tmp, relay_ip[1000], relay_name[1000], relay_ident[1000], relay_maybe_forged[1000];
+	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id;
+	char *rcpt_to2[BUFSIZE], *tstr;
+	char rcpt_domain[BUFSIZE], rcpt_acct[BUFSIZE],*r2;
+	char from_domain[BUFSIZE], from_acct[BUFSIZE];
+	char query2[BUFSIZE];
+	int block_expired = 0;
+	regex_t preg;
+	regmatch_t pmatch[10];
 	/* Clear our private data on this context */
 
 	if( verbose>1 )
@@ -728,15 +738,6 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	rowids = rowids_buf;
 	mail_from = t1+1;
 
-	char buf2[BUFSIZE], *p2, buf3[BUFSIZE];
-	char *tmp, relay_ip[1000], relay_name[1000], relay_ident[1000], relay_maybe_forged[1000];
-	char *mail_mailer, *sender, *rcpt_mailer, *recipient, *queue_id;
-	char *rcpt_to2[BUFSIZE], *tstr;
-	char rcpt_domain[BUFSIZE], *r2;
-	char query2[BUFSIZE];
-	int block_expired = 0;
-	regex_t preg;
-	regmatch_t pmatch[10];
 
 	if( verbose >1 )
 		printf("Stored Sender: %s\nPassed Recipient: %s\n", mail_from, rcpt_to);
@@ -826,7 +827,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 		strcpy(buf2,relay_ip);
 		subquery[0] = 0;
-		for(i=0; i<4; i++)
+		for(i=0; i<check_wildcard_relay_ip; i++)
 		{
 			if( subquery[0] )
 				strcat(subquery," OR ");
@@ -878,36 +879,47 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	}
 
 	/* Pull out the domain of the recipient for whitelisting checks */
-	strcpy(buf2,mail_from);
+	strcpy(buf2,rcpt_to);
 	if( buf2[0] == '<' && buf2[strlen(buf2)-1] == '>' )
 	{
 		strncpy(buf2,rcpt_to+1,strlen(rcpt_to)-2);
 		buf2[strlen(rcpt_to)-2] = 0;
 	}
+	rcpt_acct[0] = 0;
 	p2 = strrchr(buf2,'@');
 	if( p2 )
+	{
+		*p2 = 0;
+		strcpy(rcpt_acct,buf2);
 		strcpy(buf3,p2+1);
-	strcpy(buf2,buf3);
+		strcpy(buf2,buf3);
+		
+	}
 	strcpy(rcpt_domain,buf2);
 	/* See if this recipient (or domain/subdomain) is wildcard white/blacklisted
 	   Do the check in such a way that more exact matches are returned first */
 	if( check_wildcard_rcpt_to )
 	{
-		char buf2[BUFSIZE],*p2,buf3[BUFSIZE];
+		char *p2,buf3[BUFSIZE];
 		char subquery[BUFSIZE];
 		char query[BUFSIZE];
-		int i;
+		int i=0;
 
-		if( verbose>1 ) printf("   rcpt_domain=%s, rcpt_to=%s \n", rcpt_domain, rcpt_to);
+		if( verbose>1 ) printf("   rcpt_acct=%s, rcpt_domain=%s, rcpt_to=%s \n", rcpt_acct, rcpt_domain, rcpt_to);
 		strcpy(buf2,rcpt_domain);
 		subquery[0] = 0;
-		while(p2 = strchr(buf2,'.'))
+		while( (p2 = strchr(buf2,'.')) && i++ < check_wildcard_rcpt_to)
 		{
 			if( subquery[0] )
-				strcat(subquery," OR ");
-			strcat(subquery,"rcpt_to = '");
+				strcat(subquery," OR )");
+			strcat(subquery,"rcpt_to = '<");
+			if( rcpt_acct[0] )
+			{
+				strcat(subquery,rcpt_acct);
+				strcat(subquery,"@");
+			}
 			strcat(subquery,buf2);
-			strcat(subquery,"'");
+			strcat(subquery,">'");
 			p2 = strchr(buf2,'.');
 			if(p2)
 			{
@@ -947,6 +959,92 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 			{
 				if( verbose )
 					printf("  Whitelisted Relay %s. Skipping checks and passing the mail.\n", rcpt_domain);
+				goto PASS_MAIL;
+			}
+		}
+	}
+
+	/* Pull out the domain of the sender for whitelisting checks */
+	strcpy(buf2,mail_from);
+	if( buf2[0] == '<' && buf2[strlen(buf2)-1] == '>' )
+	{
+		strncpy(buf2,mail_from+1,strlen(mail_from)-2);
+		buf2[strlen(mail_from)-2] = 0;
+	}
+	from_acct[0] = 0;
+	p2 = strrchr(buf2,'@');
+	if( p2 )
+	{
+		*p2 = 0;
+		strcpy(from_acct,buf2);
+		strcpy(buf3,p2+1);
+		strcpy(buf2,buf3);
+		
+	}
+	strcpy(from_domain,buf2);
+	/* See if this recipient (or domain/subdomain) is wildcard white/blacklisted
+	   Do the check in such a way that more exact matches are returned first */
+	if( check_wildcard_mail_from )
+	{
+		char buf2[BUFSIZE],*p2,buf3[BUFSIZE];
+		char subquery[BUFSIZE];
+		char query[BUFSIZE];
+		int i=0;
+
+		if( verbose>1 ) printf("   from_acct=%s, from_domain=%s, mail_from=%s \n", from_acct, from_domain, mail_from);
+		strcpy(buf2,from_domain);
+		subquery[0] = 0;
+		while( (p2 = strchr(buf2,'.')) && i++ < check_wildcard_mail_from)
+		{
+			if( subquery[0] )
+				strcat(subquery," OR ");
+			strcat(subquery,"mail_from = '<");
+			if( rcpt_acct[0] )
+			{
+				strcat(subquery,from_acct);
+				strcat(subquery,"@");
+			}
+			strcat(subquery,buf2);
+			strcat(subquery,">'");
+			p2 = strchr(buf2,'.');
+			if(p2)
+			{
+				strcpy(buf3,p2+1);
+				strcpy(buf2,buf3);
+			}
+		}
+		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW()   AND relay_ip IS NULL AND rcpt_to   IS NULL AND (%s) ORDER BY length(mail_from) DESC", subquery);
+		if( db_query(query, &result) )
+			goto DB_FAILURE;
+
+		if( !result )
+		{
+			if(verbose)
+				printf("   store_result call returned null results!\n");
+			goto DB_FAILURE;
+		}
+
+		if( mysql_num_fields(result) != 3 )
+		{
+			if( verbose > 1 )
+				printf("  Num Fields = %d; hoped for 3\n", mysql_num_fields(result));
+			goto DB_FAILURE;
+		}
+
+		MYSQL_ROW row = mysql_fetch_row(result);
+		if( row && row[0] && strlen(row[0]) > 0 )
+		{
+			strncpy(row_id, row[0], sizeof(row_id));
+			if( atoi(row[1]) )
+			{
+				if( verbose )
+					printf("  Blacklisted Sender %s. Skipping checks and rejecting the mail.\n",mail_from);
+				goto DELAY_MAIL;
+			}
+			if( atoi(row[2]) )
+			{
+				if( verbose )
+					printf("  Whitelisted Sender %s. Skipping checks and passing the mail.\n", mail_from);
 				goto PASS_MAIL;
 			}
 		}
