@@ -933,13 +933,13 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		int i=0;
 
 		writelog(2,"   rcpt_acct=%s, rcpt_domain=%s, rcpt_to=%s \n", rcpt_acct, rcpt_domain, rcpt_to);
-		strcpy(buf2,rcpt_domain);
 		subquery[0] = 0;
-		while( (p2 = strchr(buf2,'.')) && i++ < check_wildcard_rcpt_to)
+		while( i++ < check_wildcard_rcpt_to)
 		{
 			if( subquery[0] )
 				strcat(subquery," OR )");
-			strcat(subquery,"rcpt_to = '<");
+			strcat(subquery,"rcpt_to = '<");			
+
 			if( rcpt_acct[0] )
 			{
 				strcat(subquery,rcpt_acct);
@@ -953,6 +953,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				strcpy(buf3,p2+1);
 				strcpy(buf2,buf3);
 			}
+			else 
+				break;
 		}
 		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW()   AND relay_ip IS NULL AND mail_from   IS NULL AND (%s) ORDER BY length(rcpt_to) DESC", subquery);
 		if( db_query(query, &result) )
@@ -1016,9 +1018,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 		int i=0;
 
 		writelog(2,"   from_acct=%s, from_domain=%s, mail_from=%s \n", from_acct, from_domain, mail_from);
-		strcpy(buf2,from_domain);
 		subquery[0] = 0;
-		while( (p2 = strchr(buf2,'.')) && i++ < check_wildcard_mail_from)
+		while( i++ < check_wildcard_mail_from)
 		{
 			if( subquery[0] )
 				strcat(subquery," OR ");
@@ -1036,6 +1037,8 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 				strcpy(buf3,p2+1);
 				strcpy(buf2,buf3);
 			}
+			else
+				break;
 		}
 		sprintf(query,"SELECT id, block_expires > NOW(), block_expires < NOW() FROM relaytofrom WHERE record_expires > NOW() AND relay_ip IS NULL AND rcpt_to IS NULL AND (%s) ORDER BY length(mail_from) DESC", subquery);
 		if( db_query(query, &result) )
