@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# relaydelay   This script starts and stops the relaydelay.pl greylisting milter
+#
+# chkconfig: 2345 80 30
+#
+# description: relaydelay.pl is a Sendmail Milter that implements Grelisting, \
+#              described at http://projects.puremagic.com/greylisting. \
+#              This is a spam prevention method that temporarily blocks \
+#              incoming SMTP mail if the relay/sender/recipient is unknown.
+
+# Source function library.
+. /etc/init.d/functions
+
+CONFIG=/etc/mail/relaydelay.conf
+
+case "$1" in
+    start)
+      echo -n "Starting relaydelay: "
+        /usr/local/sbin/relaydelay.pl $CONFIG
+      RETVAL=$?
+        if [ $RETVAL -eq 0 ]; then
+          success startup
+        touch /var/lock/relaydelay
+        else
+          failure startup
+        fi
+      echo
+        ;;
+
+    stop)
+      echo -n "Shutting down relaydelay: "
+        kill -s QUIT `cat /var/run/relaydelay.pid`
+      RETVAL=$?
+        if [ $RETVAL -eq 0 ]; then
+          success shutdown
+        rm -f /var/lock/relaydelay
+        else
+          failure shutdown
+        fi
+      echo
+        ;;
+
+    *)
+        echo ""
+        echo "Usage: `basename $0` { start | stop }"
+        echo ""
+        ;;
+esac
+
+
