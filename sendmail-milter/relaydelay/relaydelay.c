@@ -394,6 +394,7 @@ int split(char sep, char *str, char ***array)
 	while( (p1=strchr(p,sep)) )
 	{
 		p = p1+1;
+		*p1 = 0;           /* SMM Do NOT forget to do this!!!! */
 		arr[cnt2++] = p1+1;
 	}
 	*array = arr;
