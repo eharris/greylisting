@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <libmilter/mfapi.h>
-#include <regex.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <db.h>   /* berkeley db package */
@@ -514,43 +513,6 @@ int db_query(char *commandbuf, MYSQL_RES **result)
 # save it so we can get it later.  We also make sure the config file is loaded.
 
 */
-int do_regex(char *pattern,
-	     char *string,
-	     regex_t *preg,
-	     regmatch_t pmatch[10],
-	     int match_message)
-{
-	int errcode;
-	if( !string || !strlen(string) )
-	        writelog(1,"Regex fed zero string or zero length string! (%x)", string);
-	errcode = regcomp(preg, pattern, REG_EXTENDED);
-	if( errcode )
-	{
-		if( verbose )
-		{
-			char errbuf[1024];
-			regerror(errcode, preg, errbuf, 1024);
-			writelog(1,"Had trouble compiling regex %s (%s)!\n",
-			       pattern, errbuf);
-		}
-		return 1;
-	}
-
-	errcode = regexec(preg, string, 10, pmatch, 0);
-	if( errcode )
-	{
-		if( verbose && (errcode == REG_NOMATCH || !match_message) )
-		{
-			char errbuf[1024];
-			regerror(errcode, preg, errbuf, 1024);
-			writelog(1,"Had trouble execing regex %s on string %s (%s)!\n",
-			       pattern, string, errbuf);
-		}
-		return 1;
-	}
-
-	return 0;
-}
 
 /*
   # This function is called in all the instances when we want to create a reverse
@@ -670,6 +632,35 @@ char *securely_filter(char *in,char *out)
 	return out;
 }
 
+int check_domain(char *domainstr) /* true means passes the check */
+{
+	char *p;
+	int dots = 0;
+	int badchars = 0;
+	int goodchars = 0;
+	
+	/* counts the number of '.' in the str, and looks for 'bad' characters */
+	for(p=domainstr;*p;p++)
+	{
+		if( *p == '.' ) 
+			dots++;
+		else if( (*p >= 'a' && *p <='z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '-' || *p == '_' )
+			goodchars++;
+		else
+			badchars++;
+		if( p > domainstr )
+		{
+			if( *p == '.' && *(p-1) == '.')  /* two dots can't be next to each other! */
+				badchars++;
+		}
+	}
+	
+	if( !dots || badchars )
+		return 0;
+	else
+		return 1;
+}
+
 sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 {
 	char *mail_from = argv[0];
@@ -718,8 +709,6 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 			 *   I had to guess by what "looked" normal, or
 			 *   possible.
 			 */
-			regex_t preg;
-			regmatch_t pmatch[20];
 			char *at, *p1, secure_version[BUFSIZE*4];
 			int errcode;
 			static pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
@@ -790,20 +779,14 @@ sfsistat envfrom_callback(SMFICTX *ctx, char **argv)
 						writelog(1,"Rejecting letter with from address with too many at signs (%s)\n", securely_filter(mail_from,secure_version));
 						return SMFIS_REJECT;
 					}
-					writelog(3,"   Mutex Locking...\n");
-					pthread_mutex_lock(&mut2);
 					writelog(2,"From domain is: %s\n", securely_filter(from_domain,secure_version));
-					if( do_regex("^([-a-zA-Z_0-9]+\\.)*[-a-zA-Z_0-9]+$", from_domain, &preg, pmatch,0) == 0 )
+					if( !check_domain(from_domain) )
 					{
-						if( pmatch[0].rm_so == -1 || pmatch[0].rm_eo == -1 )
-						{
-							smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: domain part invalid");
-							writelog(1,"Rejecting letter with from address with invalid domain part (%s)\n", securely_filter(mail_from,secure_version));
-							return SMFIS_REJECT;
-						}
+						smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope from address: domain part invalid");
+						writelog(1,"Rejecting letter with from address with invalid domain part (%s)[%s]\n", 
+								 securely_filter(mail_from,secure_version), from_domain);
+						return SMFIS_REJECT;
 					}
-					writelog(3,"   Mutex UnLocking...\n");
-					pthread_mutex_unlock(&mut2);
 				}
 			}
 		}
@@ -1089,6 +1072,57 @@ WHERE id = %s AND origin_type = 'AUTO' AND passed_count = 0", arr[i] );
 #   information, and can act on it.
 */
 
+/* this routine may not be fast, but hopefully, it won't crash in a threaded environment! */
+
+int extract_relay_info(char *relay_string, char *relay_ident, char *relay_name, char *relay_ip, char *forged)
+{
+	char *p,*t, *u;
+	
+	*relay_ident = *relay_name = *relay_ip = *forged = 0;  /* clear the output strings-- they had better 
+															better be pointers to buffers! */
+	
+	if( strstr(relay_string, "may be forged") )
+	{
+		*forged = 'Y';
+		*(forged + 1) = 0;
+	}
+	
+	/* get the @ part */
+	if( (p= strchr(relay_string, '@') ) )
+	{
+		strncpy(relay_ident,relay_string, p-relay_string);
+		relay_ident[p-relay_string] = 0;
+		t = p+1;
+	}
+	else
+		t = relay_string;
+	
+	/* get the relay name - it should be terminated by either a space or a '[' */
+	u = relay_name;
+	for(p=t;*p && *p != '[' && *p != ' ' && *p != '\t'; p++)
+	{
+		*u++ = *p;
+	}
+	*u = 0;
+
+	/* get the relay_ip */
+	p = strchr(t,'[' );
+	u = relay_ip;
+	if( p )
+	{
+		p++;
+		while( *p && *p != ']' )
+		{
+			*u++ = *p++;
+		}
+		*u = 0;
+		return 1;
+	}
+	
+	return 0;
+}
+
+
 sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 {
 	/* Get our status and check to see if we need to do anything else */
@@ -1112,8 +1146,6 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 	char from_domain[BUFSIZE], from_acct[BUFSIZE];
 	char query2[BUFSIZE];
 	int block_expired = 0,i;
-	regex_t preg;
-	regmatch_t pmatch[10];
 	char secure_version[BUFSIZE*4];
 	static pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
 	/* Clear our private data on this context */
@@ -1199,52 +1231,23 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
 
 	writelog(2,"relay info: %s\n", tmp);
 	
-	writelog(3,"   Mutex Locking...\n");
-	pthread_mutex_lock(&mut);
-
-	if( do_regex("^([^ \t\r]*@)?([^ \t\r]*) ?\\[(.*)\\]( \\(may be forged\\))?$", tmp, &preg, pmatch,1) == 0 )
+	if( !extract_relay_info(tmp, relay_ident, relay_name, relay_ip, relay_maybe_forged) )
 	{
-		if( pmatch[0].rm_so == -1 || pmatch[0].rm_eo == -1 )
-		{
-				writelog(2,"Relay info could not be parsed: %s\n",
-						tmp);
-		}
-		else
-		{
-			if( pmatch[1].rm_so != -1 )
-			{
-				strncpy(relay_ident,tmp+pmatch[1].rm_so,pmatch[1].rm_eo-pmatch[1].rm_so);
-				relay_ident[pmatch[1].rm_eo-pmatch[1].rm_so] = 0;
-				writelog(2,"  Relay Ident: %s\n", relay_ident);
-			}
-			if( pmatch[2].rm_so != -1 )
-			{
-				strncpy(relay_name,tmp+pmatch[2].rm_so,pmatch[2].rm_eo-pmatch[2].rm_so);
-				relay_name[pmatch[2].rm_eo-pmatch[2].rm_so] = 0;
-				writelog(2,"  Relay name: %s\n", relay_name);
-			}
-			if( pmatch[3].rm_so != -1 )
-			{
-				strncpy(relay_ip,tmp+pmatch[3].rm_so,pmatch[3].rm_eo-pmatch[3].rm_so);
-				relay_ip[pmatch[3].rm_eo-pmatch[3].rm_so] = 0;
-				writelog(2,"  Relay IP: %s\n", relay_ip);
-			}
-			if( pmatch[4].rm_so != -1 )
-			{
-				strncpy(relay_maybe_forged,tmp+pmatch[4].rm_so,pmatch[4].rm_eo-pmatch[4].rm_so);
-				relay_maybe_forged[pmatch[4].rm_eo-pmatch[4].rm_so] = 0;
-				writelog(2,"  Relay Forged: %s\n", relay_maybe_forged);
-			}
-		}
+		writelog(2,"Relay info could not be parsed: %s\n",
+				 tmp);
 	}
 	else
 	{
-		writelog(1,"do_regex returns non-0: string to match: %s\n", tmp);
+		if( relay_ident[0] )
+			writelog(2,"  Relay Ident: %s\n", relay_ident);
+		if( relay_name[0] )
+			writelog(2,"  Relay name: %s\n", relay_name);
+		if( relay_ip[0] )
+			writelog(2,"  Relay IP: %s\n", relay_ip);
+		if( relay_maybe_forged[0] )
+			writelog(2,"  Relay Forged: %s\n", relay_maybe_forged);
 	}
 	
-	writelog(3,"   Mutex UnLocking...\n");
-	pthread_mutex_unlock(&mut);
-
 	mail_mailer = smfi_getsymval(ctx,"{mail_mailer}");
 	sender = smfi_getsymval(ctx,"{mail_addr}");
 	rcpt_mailer = smfi_getsymval(ctx,"{rcpt_mailer}");
