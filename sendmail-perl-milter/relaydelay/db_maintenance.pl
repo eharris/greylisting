@@ -142,7 +142,7 @@ BEGIN:
 
   # copy ALL rows to the reporting table, replacing any existing rows
   my $rows = $dbh->do("REPLACE INTO relayreport SELECT * FROM relaytofrom");
-  print "$rows copied to reporting table\n";
+  print "$rows copied/updated to reporting table\n";
 
   # delete any rows that expired more than an hour ago
   my $rows = $dbh->do("DELETE FROM relaytofrom WHERE record_expires < NOW() - INTERVAL 1 HOUR AND origin_type = 'AUTO'");
