@@ -6,7 +6,7 @@
 # Using Mysql 3.23.2 or later (required for NULLs allowed in indexed fields)
 
 CREATE DATABASE relaydelay;
-grant select,insert,update,delete,lock tables on relaydelay.* to db_user@'localhost' identified by 'db_pass';
+grant select,insert,update,delete on relaydelay.* to db_user@'localhost' identified by 'db_pass';
 #revoke all on relaydelay.* from db_user@'localhost';
 
 USE relaydelay;
