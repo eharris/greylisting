@@ -1084,8 +1084,7 @@ sfsistat envrcpt_callback(SMFICTX *ctx, char **argv)
         {
                 if( strlen(rcpt_to) > 254 )
                 {
-                        smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope To: address: Way, way, wa
-y too long. Buffer Overflow Exploit Attempt?");
+                        smfi_setreply(ctx, "501", "5.1.7", "Malformed envelope To: address: Way, way, way too long. Buffer Overflow Exploit Attempt?");
                         return SMFIS_REJECT;
                 }
 	}
