@@ -100,6 +100,11 @@ that uses Greylisting as a secondary technique for inconclusive call-backs.  Det
 <a href="http://www.snert.com/Software/milter-sender/">http://www.snert.com/Software/milter-sender/</a>
 </p>
 
+<p>
+S. Moonesamy has written a milter called scam-grey which uses passive OS fingerprinting to detect windows based hosts,
+and if so, to subject the sending hosts to greylisting.  The scam-grey milter webpage is at 
+<a href="http://www.elandsys.com/scam/">http://www.elandsys.com/scam/</a>
+</p>
 
 
 <h3>Exim:</h3>
@@ -214,6 +219,12 @@ Michael Moritz has another Postfix implementation, written in C/C++ and using DB
 <a href="http://mimo.gn.apc.org/gps/">http://mimo.gn.apc.org/gps/</a>
 </p>
 
+<p>
+Sean Reifschneider has released tumgreyspf, an external policy checker for Postfix, implementing both greylisting checks
+and spf checks, and using the local filesystem for the database rather than having an external dependency.  More info
+is available at 
+<a href="http://www.tummy.com/Community/software/tumgreyspf/">http://www.tummy.com/Community/software/tumgreyspf/</a>
+</p>
 
 <h3>Squirrelmail:</h3>
 
@@ -255,7 +266,34 @@ Jonas Eckerman has modified MIMEDefang to include a form of Greylisting.  More i
 </p>
 
 <p>
-James has made a Howto on using Greylisting with spamd on OpenBSD 3.5.  The page is at
+OpenBSD 3.5 appears to support greylisting "out of the box" with the use of spamd.  Here is the 
+<a href="http://www.openbsd.org/cgi-bin/man.cgi?query=spamd&apropos=0&sektion=8&manpath=OpenBSD+Current&arch=i386&format=html">
+online manual page for spamd</a>.
+</p>
+
+<p>
+Davide Libenzi has a C-based implementation using GDBM called GLST that works with XMail or with other MTA's.  
+More info is available at <a href="http://www.xmailserver.org/glst-mod.html">http://www.xmailserver.org/glst-mod.html</a>
+</p>
+
+
+<h3>Articles on Greylisting</h3>
+
+<p>
+Greylisting has a <a href="http://en.wikipedia.org/wiki/Greylisting">Wikipedia entry</a>.
+</p>
+
+<p>
+David Schweikert has an article on Greylisting that was published in the November 2004 issue of the swiss magazine InfoWeek.ch.  
+<a href="http://isg.ee.ethz.ch/publications/papers/IW21_KH_Opensource.pdf">A PDF of the article is available here</a>.
+(Article is in German)
+</p>
+
+
+<h3>Articles and Howto's including Greylisting</h3>
+
+<p>
+James has written a HOWTO on setting spamd up under OpenBSD 3.5 at 
 <a href="http://www.elwood.net/greyspamd.html">http://www.elwood.net/greyspamd.html</a>
 </p>
 
@@ -265,12 +303,6 @@ spam blocking in addition to Greylisting.  The page is at
 <a href="http://slett.net/spam-filtering-for-mx/">http://slett.net/spam-filtering-for-mx/</a>
 </p>
 
-
-<h3>Articles on Greylisting</h3>
-
-David Schweikert has an article on Greylisting that was published in the November 2004 issue of the swiss magazine InfoWeek.ch.  
-<a href="http://isg.ee.ethz.ch/publications/papers/IW21_KH_Opensource.pdf">A PDF of the article is available here</a>.
-(Article is in German)
 
 <h3>Greylisting Papers and Research</h3>
 
@@ -314,12 +346,17 @@ Commercial products incorporating varying forms of the greylisting method are st
 </p>
 
 <p>
-<a href="http://www.spam-zapper.com/">Spam-Zapper</a> offers software incorporating the greylisting method in several products aimed at different market segments.  Here is their <a href="http://www.spam-zapper.com/Features.html">Features List</a>.
+Tummy.com has a mail server integration product called vPostMaster that is free for non-commercial use.  Here is
+the <a href="http://www.tummy.com/Products/vpostmaster/">vPostMaster product page</a>
+</p>
+
+<p>
+<a href="http://www.spam-zapper.com/">Spam-Zapper</a> offers software incorporating the greylisting method in several products aimed at different market segments.  Here is their <a href="http://www.spam-zapper.com/Features.html">Features List</a>
 </p>
 
 <p>
 <a href="http://derbytech.com/">DerbyTech</a> sells a hardware based product called CipaFilter that includes greylisting as 
-an important component on their <a href="http://cipafilter.com/features.php">Features Page</a>.
+an important component on their <a href="http://cipafilter.com/features.php">Features Page</a>
 </p>
 
 <hr>
