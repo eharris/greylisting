@@ -138,6 +138,7 @@
 207.171.187	# Amazon.com (common pool)
 207.171.188	# Amazon.com (common pool)
 207.171.190	# Amazon.com (common pool)
+#209.104.63	# Ticketmaster (poor retry config)
 209.132.176.174 # sourceware.org mailing lists (high traffic, unique sender per mail)
 211.29.132	# optusnet.com.au (wierd retry pattern and more than 48hrs)
 213.136.52.31	# Mysql.com (unique sender)
