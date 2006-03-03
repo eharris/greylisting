@@ -86,7 +86,6 @@
 12.5.136.143    # Southwest Airlines (unique sender, no retry)
 12.5.136.144    # Southwest Airlines (unique sender, no retry)
 12.107.209.244	# kernel.org mailing lists (high traffic, unique sender per mail)
-12.107.209.250  # sourceware.org mailing lists (high traffic, unique sender per mail)
 63.82.37.110	# SLmail
 63.169.44.143	# Southwest Airlines (unique sender, no retry)
 63.169.44.144	# Southwest Airlines (unique sender, no retry)
@@ -139,6 +138,7 @@
 207.171.187	# Amazon.com (common pool)
 207.171.188	# Amazon.com (common pool)
 207.171.190	# Amazon.com (common pool)
+209.132.176.174 # sourceware.org mailing lists (high traffic, unique sender per mail)
 211.29.132	# optusnet.com.au (wierd retry pattern and more than 48hrs)
 213.136.52.31	# Mysql.com (unique sender)
 #216.136.226.0	# Yahoo Mail?
