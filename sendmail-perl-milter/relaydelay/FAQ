@@ -39,6 +39,7 @@ A. Several versions of Redhat and Suse shipped with non-threadsafe versions
    of the DBD mysql modules for your distrobution, or use the ones from 
    CPAN.
 
+
 Q. I'm trying to use PMilter instead of Sendmail::PMilter for with the 
    relaydelay code, but I'm getting errors about getsymval and missing 
    macros.
@@ -50,6 +51,18 @@ A. PMilter seems to have a bug regarding not preserving macro info from
    sendmail.mc:
 
    define(`confMILTER_MACROS_ENVRCPT', confMILTER_MACROS_ENVRCPT``, {i}, {auth_type}, {auth_authen}, {auth_ssf}, {auth_author}, {mail_mailer},{mail_host}, {mail_addr}, {if_addr},  {_}'')dnl
+
+
+Q. Are there any other response codes that might be handled better by outside
+   mail software than the 451 4.7.1 codes that are used by default?
+
+A. A couple of users have suggested that 421 4.3.2 seems to be better handled
+   by some servers.  Others have reported that 42x codes cause more trouble
+   than they help.  Still others suggest using 450 4.2.0.  I would definitely
+   suggest keeping with the 45x codes, and the default 451 4.7.1 code was
+   settled on after quite a bit of testing, and seemed to be handled the
+   best.  However, since a fair amount of time has passed since that testing
+   (done in 2003), use of a different code may perform better.  Caveat emptor.
 
 
 Operational Questions:
