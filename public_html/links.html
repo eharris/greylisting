@@ -50,8 +50,8 @@ here.
 <h3>Whitepaper Translations:</h3>
 
 <p>
-French - <a href="http://www.ba-cst.com/technique/Greylisting/">http://www.ba-cst.com/technique/Greylisting/</a><br>
-French - <a href="http://sebastien.nameche.fr/spam/greylisting/french.html">http://sebastien.nameche.fr/spam/greylisting/french.html</a><br>
+French - <a href="https://web.archive.org/web/20050829203419/http://www.ba-cst.com/technique/Greylisting/">https://web.archive.org/web/20050829203419/http://www.ba-cst.com/technique/Greylisting/</a> (Internet Archive)<br>
+French - <a href="https://web.archive.org/web/20181118134250/http://sebastien.nameche.fr/spam/greylisting/french.html">https://web.archive.org/web/20181118134250/http://sebastien.nameche.fr/spam/greylisting/french.html</a> (Internet Archive)<br>
 </p>
 
 
@@ -63,29 +63,29 @@ available from the <a href="downloads.html">Downloads</a> link.
 </p>
 
 <p>
-Development versions of relaydelay are also available from svn at 
-<a href="http://projects.puremagic.com/web-svn/wsvn/greylisting/">http://projects.puremagic.com/web-svn/wsvn/greylisting/</a>.
+Source code, including unreleased development versions of relaydelay are available from github at 
+<a href="https://github.com/eharris/greylisting">https://github.com/eharris/greylisting</a>.
 </p>
 
 <p>
 Morris Maynard has written some very helpful installation instructions for the relaydelay sendmail milter.  His pages are at
-<a href="http://www.maynidea.com/sendmail/relaydelay.html">http://www.maynidea.com/sendmail/relaydelay.html</a>.
+<a href="https://web.archive.org/web/20130312110646/http://www.maynidea.com/sendmail/relaydelay.html">https://web.archive.org/web/20130312110646/http://www.maynidea.com/sendmail/relaydelay.html</a>. (Internet Archive)
 </p>
 
 <p>
 Ian Ballantyne has written a very informative installation guide for the relaydelay sendmail milter.  His docs are at
-<a href="http://midori.shacknet.nu/OpenSourceProjects/Setting_up_Greylisting_with_Sendmail_v1.2.html">http://midori.shacknet.nu/OpenSourceProjects/Setting_up_Greylisting_with_Sendmail_v1.2.html</a>.
+<a href="https://web.archive.org/web/20160610063733/http://midori.shacknet.nu/OpenSourceProjects/Setting_up_Greylisting_with_Sendmail_v1.2.html">https://web.archive.org/web/20160610063733/http://midori.shacknet.nu/OpenSourceProjects/Setting_up_Greylisting_with_Sendmail_v1.2.html</a>. (Internet Archive)
 </p>
 
 <p>
 Chris Paul has notes about using the example implementation under OpenBSD 3.4 at
-<a href="http://www.sfobug.org/meeting_notes/chris_paul/greylist_openbsd.html">http://www.sfobug.org/meeting_notes/chris_paul/greylist_openbsd.html</a>
+<a href="https://web.archive.org/web/20090924022534/http://www.sfobug.org/meeting_notes/chris_paul/greylist_openbsd.html">https://web.archive.org/web/20090924022534/http://www.sfobug.org/meeting_notes/chris_paul/greylist_openbsd.html</a>.  (Internet Archive)
 </p>
 
 <p>
 Jose Marcio Martins da Cruz has written a native sendmail milter (in C) that uses a modified version of Greylisting that is
 designed to reduce the required resources to scale for higher mail volumes.  More info at 
-<a href="http://j-chkmail.ensmp.fr/">http://j-chkmail.ensmp.fr/</a>.
+<a href="https://web.archive.org/web/20090106011115/http://www.j-chkmail.org/wiki">https://web.archive.org/web/20090106011115/http://www.j-chkmail.org/wiki</a>. (Internet Archive)
 </p>
 
 <p>
@@ -97,13 +97,8 @@ His project is at <a href="http://hcpnet.free.fr/milter-greylist/">http://hcpnet
 <p>
 Anthony Howe has an alternative Sendmail C based milter that supports 
 the Sendmail access database (Berkeley DB) for white-listing. Further 
-details at <a href="http://www.snert.com/Software/milter-gris/">http://www.snert.com/Software/milter-gris/</a>
-</p>
-
-<p>
-Also from Anthony Howe is a Sendmail C based call-back milter 
-that uses Greylisting as a secondary technique for inconclusive call-backs.  Details at 
-<a href="http://www.snert.com/Software/milter-sender/">http://www.snert.com/Software/milter-sender/</a>
+details at <a href="http://www.snertsoft.com/sendmail/milter-gris/">http://www.snertsoft.com/sendmail/milter-gris/</a> (Originally at http://www.snert.com/Software/milter-gris/)</p>
+Other useful milters are also available at <a href="http://www.snertsoft.com/">http://www.snertsoft.com/</a>
 </p>
 
 <p>
@@ -114,7 +109,7 @@ and if so, to subject the sending hosts to greylisting.  The scam-grey milter we
 
 <p>
 smf-grey is a C-based Sendmail milter that uses the QDBM database for whitelisting and greylisting.
-More info at <a href="http://smfs.sourceforge.net/smf-grey.html">http://smfs.sourceforge.net/smf-grey.html</a>
+More info at <a href="https://web.archive.org/web/20120424080811/http://smfs.sourceforge.net/smf-grey.html">https://web.archive.org/web/20120424080811/http://smfs.sourceforge.net/smf-grey.html</a> (Internet Archive)
 </p>
 
 
@@ -133,11 +128,6 @@ vanilla build of Exim 4 and does not require any special patches or extensions. 
 as a freestanding executable, it should be able to be used with any MTA that supports calling out to an external program. 
 The implementation also includes outgoing message processing. See:
 <a href="http://sourceforge.net/projects/bagley/">http://sourceforge.net/projects/bagley/</a>
-</p>
-
-<p>
-Roman Festchook is also working on an implementation for Exim.  It is at
-<a href="http://llab.zhitomir.net/?greylist">http://llab.zhitomir.net/?greylist</a>
 </p>
 
 <p>
@@ -162,7 +152,7 @@ a nice Powerpoint presentation that has a graph of the method's effectiveness.
 
 <p>
 Tollef Fog Heen has an in-Exim implementation using PostgresSQL.  Information on it is at
-<a href="http://raw.no/personal/blog/tech/Debian/2004-03-14-15-55_greylisting">http://raw.no/personal/blog/tech/Debian/2004-03-14-15-55_greylisting</a>
+<a href="https://web.archive.org/web/20080905173509/http://raw.no/personal/blog/tech/Debian/2004-03-14-15-55_greylisting">https://web.archive.org/web/20080905173509/http://raw.no/personal/blog/tech/Debian/2004-03-14-15-55_greylisting</a> (Internet Archive)
 </p>
 
 <p>
@@ -171,7 +161,7 @@ Johannes Berg has an implementation for Exim 4 at
 </p>
 
 <p>An unidentified person has another implementation for Exim and Mysql, based on Tollef's implementation.  Info is at
-<a href="http://theinternetco.net/projects/exim/greylist">http://theinternetco.net/projects/exim/greylist</a>
+<a href="https://web.archive.org/web/20060206233800/http://theinternetco.net/projects/exim/greylist">https://web.archive.org/web/20060206233800/http://theinternetco.net/projects/exim/greylist</a> (Internet Archive)
 </p>
 
 
@@ -189,7 +179,7 @@ Peter Conrad has an alpha-level implementation available at
 
 <p>
 Jon Atkins has a simplified perl implementation at
-<a href="http://www.jonatkins.com/qgreylist/">http://www.jonatkins.com/qgreylist/</a>.
+<a href="https://web.archive.org/web/20050904201110/http://www.jonatkins.com/qgreylist/">https://web.archive.org/web/20050904201110/http://www.jonatkins.com/qgreylist/</a>. (Internet Archive)
 </p>
 
 <p>
@@ -199,13 +189,13 @@ Rob Bos has adapted Jon Akins qgreylist to use a mysql backend.  More info at
 
 <p>
 Sirko Zidlewitz has enhanced a version of Jon Atkins implementation.  It is available at
-<a href="http://www.datenklause.de/en/software/qgreylistrbl.html">http://www.datenklause.de/en/software/qgreylistrbl.html</a>.
+<a href="https://web.archive.org/web/20080930065752/http://www.datenklause.de/en/software/qgreylistrbl.html">https://web.archive.org/web/20080930065752/http://www.datenklause.de/en/software/qgreylistrbl.html</a>. (Internet Archive)
 </p>
 
 <p>
 Zaid Amireh has developed a C-based implementation of a sender-IP only version of Greylisting that is targeted at higher
 volume servers.  Information on it is available at
-<a href="http://oss.albawaba.com/cqgreylist.html">http://oss.albawaba.com/cqgreylist.html</a>.
+<a href="https://web.archive.org/web/20171203193115/http://oss.albawaba.com/cqgreylist.html">https://web.archive.org/web/20171203193115/http://oss.albawaba.com/cqgreylist.html</a>. (Internet Archive)
 </p>
 
 <p>
@@ -215,14 +205,14 @@ More info at <a href="http://qgreylist-pgsql.sourceforge.net/">http://qgreylist-
 
 <p>
 Thomas Mangin has made a new implementation for Qmail.
-More info at <a href="http://thomas.mangin.me.uk/software/qmail-greylist.html">http://thomas.mangin.me.uk/software/qmail-greylist.html</a>.
+More info at <a href="https://web.archive.org/web/20070825064326/http://thomas.mangin.me.uk/software/qmail-greylist.html">https://web.archive.org/web/20070825064326/http://thomas.mangin.me.uk/software/qmail-greylist.html</a>. (Internet Archive)
 </p>
 
 
 <h3>Qpsmtpd:</h3>
 
 <p>
-Gavin Carr has implemented a greylisting plugin for <a href="http://develooper.com/code/qpsmtpd/">Qpsmtpd</a> 
+Gavin Carr has implemented a greylisting plugin for <a href="https://smtpd.github.io/qpsmtpd/">Qpsmtpd</a> 
 (a perl based replacement for qmail-smtpd).  The plugin is available at 
 <a href="http://www.openfusion.com.au/labs/dist/denysoft_greylist">http://www.openfusion.com.au/labs/dist/denysoft_greylist</a>.
 </p>
@@ -248,7 +238,7 @@ Salim Gasmi has written a C based implementation of Greylisting for Postfix.  It
 
 <p>
 Michael Moritz has another Postfix implementation, written in C/C++ and using DBI/Mysql.  It is available from
-<a href="http://mimo.gn.apc.org/gps/">http://mimo.gn.apc.org/gps/</a>
+<a href="https://web.archive.org/web/20190404204024/http://mimo.gn.apc.org/gps/">https://web.archive.org/web/20190404204024/http://mimo.gn.apc.org/gps/</a> (Internet Archive)
 </p>
 
 <p>
@@ -261,14 +251,14 @@ is available at
 <p>
 Kyle Lanclos maintains Grappy, a high performance policy server for Postfix written in Python and using either PostgreSQL
 or MySQL as a storage backend. It is available from
-<a href="http://grappy.lanclos.org/">http://grappy.lanclos.org/</a>
+<a href="https://web.archive.org/web/20160404094830/http://grappy.lanclos.org/">https://web.archive.org/web/20160404094830/http://grappy.lanclos.org/</a> (Internet Archive)
 </p>
 
 <h3>Squirrelmail:</h3>
 
 <p>
 Jason Frisvold has written a plugin for Squirrelmail.  It is available from
-<a href="http://www.godshell.com/toaster/">http://www.godshell.com/toaster/</a>
+<a href="https://web.archive.org/web/20061129025347/http://www.godshell.com/toaster/">https://web.archive.org/web/20061129025347/http://www.godshell.com/toaster/</a> (Internet Archive)
 </p>
 
 <h3>Microsoft Exchange/IIS:</h3>
@@ -294,13 +284,12 @@ David Parsons has written a simple mailserver and client using greylisting.  His
 
 <p>
 David Given has written a mail proxy called spey.  It is hosted at Sourceforge.  Here is the
-<a href="http://spey.sourceforge.net/">spey homepage</a>.
+<a href="http://cowlark.com/spey/">spey homepage</a>. (Originally at http://spey.sourceforge.net/)
 </p>
 
 <p>
 Anti-SPAM SMTP Proxy Server (ASSP) is a very featureful proxy project hosted at Sourceforge.  Here is the
-<a href="http://sourceforge.net/projects/assp/">ASSP Sourceforge Page</a> and also a link to the
-<a href="http://www.iworld.de/homes/fb/ASSP/">Developers page</a>.
+<a href="http://sourceforge.net/projects/assp/">ASSP Sourceforge Page</a>.
 </p>
 
 <h3>Others:</h3>
@@ -312,7 +301,7 @@ Vernon Schryver has added a form of Greylisting to the Distributed Checksum Clea
 
 <p>
 Jonas Eckerman has modified MIMEDefang to include a form of Greylisting.  More info at 
-<a href="http://whatever.frukt.org/mimedefang-filter.shtml">http://whatever.frukt.org/mimedefang-filter.shtml</a>
+<a href="https://web.archive.org/web/20120319052706/http://whatever.frukt.org/mimedefang-filter.shtml">https://web.archive.org/web/20120319052706/http://whatever.frukt.org/mimedefang-filter.shtml</a> (Internet Archive)
 </p>
 
 <p>
@@ -335,7 +324,7 @@ Greylisting has a <a href="http://en.wikipedia.org/wiki/Greylisting">Wikipedia e
 
 <p>
 David Schweikert has an article on Greylisting that was published in the November 2004 issue of the swiss magazine InfoWeek.ch.  
-<a href="http://isg.ee.ethz.ch/publications/papers/IW21_KH_Opensource.pdf">A PDF of the article is available here</a>.
+<a href="https://web.archive.org/web/20110724211024/http://isg.ee.ethz.ch/publications/papers/IW21_KH_Opensource.pdf">A PDF of the article is available here</a>. (Internet Archive)
 (Article is in German)
 </p>
 
@@ -344,13 +333,13 @@ David Schweikert has an article on Greylisting that was published in the Novembe
 
 <p>
 James has written a HOWTO on setting spamd up under OpenBSD 3.5 at 
-<a href="http://www.elwood.net/greyspamd.html">http://www.elwood.net/greyspamd.html</a>
+<a href="https://web.archive.org/web/20070607194511/http://www.elwood.net/greyspamd.html">https://web.archive.org/web/20070607194511/http://www.elwood.net/greyspamd.html</a> (Internet Archive)
 </p>
 
 <p>
 Tor Slettnes has created a paper titled "Spam Filtering for Mail Exchangers" which covers several methods of 
 spam blocking in addition to Greylisting.  The page is at 
-<a href="http://slett.net/spam-filtering-for-mx/">http://slett.net/spam-filtering-for-mx/</a>
+<a href="https://web.archive.org/web/20171117162435/http://slett.net/spam-filtering-for-mx/">https://web.archive.org/web/20171117162435/http://slett.net/spam-filtering-for-mx/</a> (Internet Archive)
 </p>
 
 
@@ -399,11 +388,11 @@ Here is their <a href="http://www.spam-zapper.com/Features.html">Features List</
 <H3>Other Commercial Products</H3>
 
 <p>
-<a href="http://www.canit.ca/releases.php">CanIt Mail Server Software Release Info</a>
+<a href="http://www.canit.ca/releases.php">CanIt Mail Server Software Release Info</a> (Link defunct)
 </p>
 
 <p>
-<a href="http://www.isode.com/press/pr-antispam102.html">Isode Press Release</a>
+<a href="http://www.isode.com/press/pr-antispam102.html">Isode Press Release</a> (Link defunct)
 </p>
 
 <p>
@@ -421,27 +410,27 @@ the <a href="http://www.tummy.com/Products/vpostmaster/">vPostMaster product pag
 
 <p>
 <a href="http://derbytech.com/">DerbyTech</a> sells a hardware based product called CipaFilter that includes greylisting as 
-an important component on their <a href="http://cipafilter.com/features.php">Features Page</a>
+an important component on their features list. (Link defunct)
 </p>
 
 <p>
-<a href="http://www.vamsoft.com/orf/">Vamsoft ORF</a> is a commercial server-side spam filter for the 
+<a href="http://www.vamsoft.com/orf/">Vamsoft ORF</a> (Link defunct) is a commercial server-side spam filter for the 
 Windows 2000/2003 IIS SMTP Service and Microsoft Exchange 2000/2003.
 </p>
 
 <p>
-<a href="http://www.drcc.com/nsj/nsj.nsf/homepage">no.Spam.java</a> is a commercial java based smtp proxy filter 
+<a href="http://www.drcc.com/nsj/nsj.nsf/homepage">no.Spam.java</a> (Link defunct) is a commercial java based smtp proxy filter 
 with anti-spam capabilities.
 </p>
 
 <p>
-<a href="http://www.trimmail.com/">trimMail</a> sells the trimMail Inbox email security appliance, which incorporates
+<a href="http://www.trimmail.com/">trimMail</a> (Link defunct) sells the trimMail Inbox email security appliance, which incorporates
 a form of Greylisting.
 </p>
 
 <p>
 <a href="http://www.altn.com/">MDaemon</a> is a mail server product that incorporates several anti-spam techniques,
-including Greylisting.  Here is <a href="http://www.altn.com/products/features.asp/product_id/MDaemon">a list of features.</a>
+including Greylisting.
 </p>
 
 <p>
